@@ -1,0 +1,88 @@
+# Tests sources against a couple of local destinations
+
+name: src | rest_api, sql_database, filesystem
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+
+  # RUNTIME__SENTRY_DSN: https://6f6f7b6f8e0f458a89be4187603b55fe@o1061158.ingest.sentry.io/4504819859914752
+  RUNTIME__LOG_LEVEL: ERROR
+
+  ACTIVE_DESTINATIONS: "[\"duckdb\", \"postgres\", \"filesystem\"]"
+  ALL_FILESYSTEM_DRIVERS: "[\"file\"]"
+
+jobs:
+  run_loader:
+    name: src | rest_api, sql_database, filesystem
+    strategy:
+      fail-fast: false
+    defaults:
+      run:
+        shell: bash
+    runs-on: "ubuntu-latest"
+
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgis/postgis
+        # Provide the password for postgres
+        env:
+          POSTGRES_DB: dlt_data
+          POSTGRES_USER: loader
+          POSTGRES_PASSWORD: loader
+        ports:
+          - 5432:5432
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2019-latest
+        env:
+          SA_PASSWORD: Strong!Passw0rd
+          ACCEPT_EULA: 'Y'
+        ports:
+          - 1433:1433
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo ACCEPT_EULA=Y apt-get install --yes msodbcsql18
+          uv sync --extra postgres --extra postgis --extra duckdb --extra parquet --extra filesystem --extra cli --extra sql_database --extra mssql --group sentry-sdk --group pipeline --group sources --group adbc
+
+      - name: Copy secrets for local tests
+        run: |
+          cp tests/.dlt/dev.secrets.toml tests/.dlt/secrets.toml
+
+      # run sources tests in load against configured destinations
+      - run: pytest tests/load/sources
+        name: Run tests Linux
+
+      # here we upgrade sql alchemy to 2 an run the sql_database tests again
+      - name: Upgrade sql alchemy
+        run: uv run pip install sqlalchemy==2.0.32
+
+      - run: pytest tests/load/sources/sql_database
+        name: Run tests Linux
