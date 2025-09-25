@@ -1,0 +1,2 @@
+# This file keeps the TESTDATA directory in git
+# Test data files are ignored by .gitignore but directory structure is preserved
