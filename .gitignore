@@ -269,3 +269,8 @@ secrets.json
 # Test data (keep directory structure but ignore content)
 TESTDATA/*
 !TESTDATA/.gitkeep
+
+# Claude Code files - not needed in repository
+CLAUDE.md
+dlt_claude_code_guide.md
+.claude/
