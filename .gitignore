@@ -115,14 +115,7 @@ build/Release
 # Users Environment Variables
 .lock-wscript
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -130,13 +123,6 @@ build/Release
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-# Claude Code files
-CLAUDE.md
-.claude/
-
-# Test data directory
-TESTDATA/
 
 # Python
 __pycache__/
@@ -268,24 +254,15 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-# IntelliJ IDEA
+# IDE files
 .idea/
 *.iws
 *.iml
 *.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-# NetBeans
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-# VS Code
 .vscode/
+*.swp
+*.swo
+*~
 
 # C/C++
 *.o
@@ -435,8 +412,6 @@ Desktop.ini
 # Recycle Bin used on file shares
 $RECYCLE.BIN/
 
-# Mac crap
-.DS_Store
 
 # Security and sensitive files
 *.key
