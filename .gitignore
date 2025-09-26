@@ -1,4 +1,17 @@
-# Python
+# ================================================================================================
+# ENVIRONMENT AND SECRETS - NEVER COMMIT THESE FILES
+# ================================================================================================
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+secrets.toml
+config.toml
+
+# ================================================================================================
+# PYTHON
+# ================================================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -274,3 +287,28 @@ TESTDATA/*
 CLAUDE.md
 dlt_claude_code_guide.md
 .claude/
+
+# BigData Processing System - Docker Infrastructure
+# Data directories (keep structure but ignore content)
+data/input/*
+data/temp/*
+data/processed/*
+!data/input/.gitkeep
+!data/temp/.gitkeep
+!data/processed/.gitkeep
+
+# Docker volumes
+postgres_data/
+clickhouse_data/
+namenode_data/
+datanode_data/
+redis_data/
+
+# Service-specific files
+services/frontend/build/
+services/airflow/logs/
+services/airflow/airflow-webserver.pid
+services/airflow/standalone_admin_password.txt
+
+# dlt specific
+.dlt/

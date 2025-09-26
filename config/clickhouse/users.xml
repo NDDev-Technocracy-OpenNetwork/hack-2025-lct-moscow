@@ -1,0 +1,186 @@
+<?xml version="1.0"?>
+<!--
+====================================================================================================
+BIGDATA PROCESSING SYSTEM - CLICKHOUSE USERS CONFIGURATION
+====================================================================================================
+This file defines user accounts, profiles, and quotas for ClickHouse
+Production-ready configuration with environment variable support
+====================================================================================================
+-->
+<clickhouse>
+    <!--
+    ====================================================================================================
+    PROFILES - Performance and Resource Settings
+    ====================================================================================================
+    -->
+    <profiles>
+        <!-- Default profile for basic operations -->
+        <default>
+            <max_memory_usage from_env="CLICKHOUSE_MAX_MEMORY_USAGE">10000000000</max_memory_usage>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+            <load_balancing>random</load_balancing>
+            <max_query_size>1000000000</max_query_size>
+            <max_insert_block_size>1048576</max_insert_block_size>
+            <max_threads from_env="CLICKHOUSE_MAX_THREADS">8</max_threads>
+            <max_execution_time>3600</max_execution_time>
+            <max_rows_to_read>1000000000</max_rows_to_read>
+            <max_bytes_to_read>1000000000000</max_bytes_to_read>
+            <readonly>0</readonly>
+        </default>
+
+        <!-- High-performance profile for big data processing -->
+        <bigdata_profile>
+            <max_memory_usage>20000000000</max_memory_usage>
+            <max_bytes_before_external_group_by>20000000000</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>20000000000</max_bytes_before_external_sort>
+            <max_query_size>1000000000</max_query_size>
+            <max_insert_block_size>1048576</max_insert_block_size>
+            <max_threads>16</max_threads>
+            <use_uncompressed_cache>1</use_uncompressed_cache>
+            <max_execution_time>7200</max_execution_time>
+            <max_rows_to_read>10000000000</max_rows_to_read>
+            <max_bytes_to_read>10000000000000</max_bytes_to_read>
+            <max_result_rows>1000000000</max_result_rows>
+            <max_result_bytes>10000000000</max_result_bytes>
+            <result_overflow_mode>break</result_overflow_mode>
+            <readonly>0</readonly>
+
+            <!-- Advanced settings for large data processing -->
+            <max_rows_in_join>100000000</max_rows_in_join>
+            <max_bytes_in_join>10000000000</max_bytes_in_join>
+            <max_rows_to_transfer>100000000</max_rows_to_transfer>
+            <max_bytes_to_transfer>10000000000</max_bytes_to_transfer>
+            <max_rows_in_distinct>100000000</max_rows_in_distinct>
+            <max_bytes_in_distinct>10000000000</max_bytes_in_distinct>
+            <max_rows_to_sort>100000000</max_rows_to_sort>
+            <max_bytes_to_sort>10000000000</max_bytes_to_sort>
+
+            <!-- Optimization settings -->
+            <compile_expressions>1</compile_expressions>
+            <min_count_to_compile_expression>3</min_count_to_compile_expression>
+            <optimize_read_in_order>1</optimize_read_in_order>
+            <optimize_aggregation_in_order>1</optimize_aggregation_in_order>
+        </bigdata_profile>
+
+        <!-- Read-only profile for reporting and analytics -->
+        <readonly_profile>
+            <max_memory_usage>5000000000</max_memory_usage>
+            <max_execution_time>1800</max_execution_time>
+            <max_rows_to_read>500000000</max_rows_to_read>
+            <max_bytes_to_read>5000000000</max_bytes_to_read>
+            <max_result_rows>10000000</max_result_rows>
+            <max_result_bytes>1000000000</max_result_bytes>
+            <readonly>1</readonly>
+            <allow_ddl>0</allow_ddl>
+        </readonly_profile>
+    </profiles>
+
+    <!--
+    ====================================================================================================
+    USERS - Account Configuration
+    ====================================================================================================
+    -->
+    <users>
+        <!-- Default user (minimal permissions) -->
+        <default>
+            <password></password>
+            <networks incl="networks" replace="replace">
+                <ip>::/0</ip>
+            </networks>
+            <profile>readonly_profile</profile>
+            <quota>default</quota>
+            <allow_databases>
+                <database>system</database>
+            </allow_databases>
+        </default>
+
+        <!-- Main application user - uses environment variable for password -->
+        <bigdata_user>
+            <!-- Password loaded from environment variable CLICKHOUSE_PASSWORD -->
+            <password from_env="CLICKHOUSE_PASSWORD"></password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>bigdata_profile</profile>
+            <quota>bigdata_quota</quota>
+
+            <!-- Database access permissions -->
+            <allow_databases>
+                <database>analytics</database>
+                <database>system</database>
+                <database>default</database>
+            </allow_databases>
+
+            <!-- Allow all necessary operations for data processing -->
+            <access_management>1</access_management>
+            <show_named_queries>1</show_named_queries>
+            <show_row_policies>1</show_row_policies>
+        </bigdata_user>
+
+        <!-- Admin user for maintenance (if needed) -->
+        <admin>
+            <password from_env="CLICKHOUSE_ADMIN_PASSWORD"></password>
+            <networks>
+                <ip>127.0.0.1/32</ip>
+                <ip>172.20.0.0/16</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+            <show_named_queries>1</show_named_queries>
+            <show_row_policies>1</show_row_policies>
+        </admin>
+    </users>
+
+    <!--
+    ====================================================================================================
+    QUOTAS - Resource Usage Limits
+    ====================================================================================================
+    -->
+    <quotas>
+        <!-- Default quota (unlimited for admin operations) -->
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+
+        <!-- Big data processing quota -->
+        <bigdata_quota>
+            <interval>
+                <duration>3600</duration>
+                <queries>1000</queries>
+                <errors>100</errors>
+                <result_rows>10000000000</result_rows>
+                <read_rows>100000000000</read_rows>
+                <execution_time>7200</execution_time>
+            </interval>
+            <!-- Daily limits -->
+            <interval>
+                <duration>86400</duration>
+                <queries>10000</queries>
+                <errors>1000</errors>
+                <result_rows>100000000000</result_rows>
+                <read_rows>1000000000000</read_rows>
+                <execution_time>28800</execution_time>
+            </interval>
+        </bigdata_quota>
+
+        <!-- Limited quota for read-only access -->
+        <readonly_quota>
+            <interval>
+                <duration>3600</duration>
+                <queries>100</queries>
+                <errors>10</errors>
+                <result_rows>10000000</result_rows>
+                <read_rows>100000000</read_rows>
+                <execution_time>1800</execution_time>
+            </interval>
+        </readonly_quota>
+    </quotas>
+</clickhouse>

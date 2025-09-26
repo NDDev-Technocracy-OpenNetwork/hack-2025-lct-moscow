@@ -1,0 +1,241 @@
+# ================================================================================================
+# BIGDATA PROCESSING SYSTEM - BACKEND DOCKERFILE (PRODUCTION)
+# ================================================================================================
+# Production-optimized FastAPI application with security hardening
+# Multi-stage build for minimal image size and maximum security
+# ================================================================================================
+
+FROM python:3.11-slim as base
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# ================================================================================================
+# DEPENDENCIES STAGE
+# ================================================================================================
+FROM base AS dependencies
+
+# Install system dependencies required for Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    libpq-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libffi-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Copy and install Python dependencies
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+# ================================================================================================
+# PRODUCTION STAGE
+# ================================================================================================
+FROM base AS production
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    postgresql-client \
+    libpq5 \
+    libxml2 \
+    libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid appuser --shell /bin/bash --create-home appuser
+
+# Copy Python dependencies from dependencies stage
+COPY --from=dependencies /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=dependencies /usr/local/bin /usr/local/bin
+
+# Set working directory
+WORKDIR /app
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/data/{input,temp,processed} \
+    /app/logs \
+    /tmp/app && \
+    chown -R appuser:appuser /app /tmp/app && \
+    chmod -R 755 /app/data && \
+    chmod -R 755 /app/logs
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Create production configuration file
+RUN cat > /app/gunicorn.conf.py << 'EOF'
+# ================================================================================================
+# GUNICORN PRODUCTION CONFIGURATION
+# ================================================================================================
+import multiprocessing
+import os
+
+# Server socket
+bind = "0.0.0.0:8000"
+backlog = 2048
+
+# Worker processes
+workers = multiprocessing.cpu_count() * 2 + 1
+worker_class = "uvicorn.workers.UvicornWorker"
+worker_connections = 1000
+max_requests = 10000
+max_requests_jitter = 1000
+preload_app = True
+timeout = 120
+keepalive = 2
+
+# Security
+limit_request_line = 0
+limit_request_fields = 100
+limit_request_field_size = 8190
+
+# Application
+wsgi_file = "app.main:app"
+
+# Logging
+accesslog = "-"
+errorlog = "-"
+loglevel = os.getenv("LOG_LEVEL", "info").lower()
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
+
+# Process naming
+proc_name = "bigdata-backend"
+
+# Server mechanics
+daemon = False
+pidfile = "/tmp/app/gunicorn.pid"
+user = 1001
+group = 1001
+tmp_upload_dir = "/tmp/app"
+
+# SSL (if needed in production)
+# keyfile = "/path/to/keyfile"
+# certfile = "/path/to/certfile"
+
+# Worker timeout and graceful timeout
+graceful_timeout = 30
+worker_tmp_dir = "/dev/shm"
+EOF
+
+# Create startup script with proper error handling and environment validation
+RUN cat > /app/start.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}Starting BigData Processing Backend...${NC}"
+
+# Function to log with timestamp
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+error_log() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" >&2
+}
+
+warn_log() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+# Validate required environment variables
+log "Validating environment variables..."
+required_vars=("DATABASE_URL" "REDIS_URL")
+missing_vars=()
+
+for var in "${required_vars[@]}"; do
+    if [[ -z "${!var}" ]]; then
+        missing_vars+=("$var")
+    fi
+done
+
+if [[ ${#missing_vars[@]} -gt 0 ]]; then
+    error_log "Missing required environment variables: ${missing_vars[*]}"
+    exit 1
+fi
+
+# Test database connectivity
+log "Testing database connectivity..."
+timeout 30 bash -c 'until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-bigdata_user}; do
+    echo "Waiting for PostgreSQL..."
+    sleep 2
+done' || {
+    error_log "Database connectivity check failed"
+    exit 1
+}
+
+# Test Redis connectivity
+log "Testing Redis connectivity..."
+timeout 30 bash -c 'until redis-cli -h redis -p 6379 ping | grep -q PONG; do
+    echo "Waiting for Redis..."
+    sleep 2
+done' 2>/dev/null || {
+    warn_log "Redis connectivity check failed - continuing anyway"
+}
+
+# Run database migrations if needed
+if [[ "${RUN_MIGRATIONS:-true}" == "true" ]]; then
+    log "Running database migrations..."
+    python -m alembic upgrade head || {
+        error_log "Database migrations failed"
+        exit 1
+    }
+fi
+
+# Create log directory if it doesn't exist
+mkdir -p /app/logs
+
+# Set proper permissions
+chmod 755 /app/logs
+chmod 755 /app/data
+
+log "Environment validation completed successfully"
+log "Starting application server..."
+
+# Start the application based on environment
+if [[ "${ENVIRONMENT:-production}" == "development" ]]; then
+    warn_log "Running in development mode"
+    exec uvicorn app.main:app \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --reload \
+        --log-level "${LOG_LEVEL:-info}"
+else
+    log "Running in production mode with Gunicorn"
+    exec gunicorn -c /app/gunicorn.conf.py app.main:app
+fi
+EOF
+
+# Make startup script executable
+RUN chmod +x /app/start.sh && chown appuser:appuser /app/start.sh
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check with improved endpoint
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Use startup script
+CMD ["/app/start.sh"]
