@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 import uuid
+import json
 
 from app.api.v1 import api_router
 from app.core.websocket_manager import WebSocketManager
@@ -18,7 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global WebSocket manager
+# Global managers
 websocket_manager = WebSocketManager()
 
 
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to create database tables: {e}")
 
-    # Add websocket manager to app state
+    # Add managers to app state
     app.state.websocket_manager = websocket_manager
 
     logger.info("Application startup completed")
@@ -67,7 +68,6 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
-
 
 # Health check endpoint
 @app.get("/health")
@@ -121,12 +121,14 @@ async def notify_job_update(job_id: str, notification: dict):
         # Validate job_id format
         uuid.UUID(job_id)
 
-        # Send notification to subscribed clients
-        await websocket_manager.send_job_update(job_id, {
+        # Send notification to subscribed clients via both WebSocket and Socket.IO
+        notification_data = {
             "type": "job_update",
             "job_id": job_id,
             "data": notification
-        })
+        }
+
+        await websocket_manager.send_job_update(job_id, notification_data)
 
         logger.info(f"Notification sent for job {job_id}: {notification.get('status', 'unknown')}")
 
@@ -168,6 +170,57 @@ async def startup_message():
     logger.info(f"📖 API Documentation: http://localhost:8000/docs")
     logger.info(f"🔌 WebSocket URL: ws://localhost:8000/ws/{{client_id}}")
 
+
+# Socket.IO compatibility endpoint
+@app.websocket("/socket.io/")
+async def socketio_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint with Socket.IO protocol compatibility"""
+    await websocket.accept()
+    client_id = f"socketio_{uuid.uuid4().hex[:8]}"
+
+    logger.info(f"Socket.IO-compatible client {client_id} connected")
+
+    # Send initial connection confirmation in Engine.IO format
+    # Format: engineio_packet_type + data
+    await websocket.send_text('0{"sid":"' + client_id + '","upgrades":[],"pingInterval":25000,"pingTimeout":20000}')
+
+    try:
+        while True:
+            # Receive message from client
+            message = await websocket.receive_text()
+            logger.debug(f"Received Socket.IO message from {client_id}: {message}")
+
+            # Handle Engine.IO ping/pong
+            if message == "2":  # ping
+                await websocket.send_text("3")  # pong
+                continue
+            elif message == "3":  # pong
+                continue
+
+            # Handle Socket.IO messages
+            if message.startswith('42'):  # Socket.IO event message
+                try:
+                    # Extract JSON from Socket.IO message format
+                    data_part = message[2:]  # Remove '42' prefix
+                    data = json.loads(data_part)
+
+                    if len(data) >= 2:
+                        event_name = data[0]
+                        event_data = data[1] if len(data) > 1 else {}
+
+                        logger.info(f"Socket.IO event '{event_name}' from {client_id}: {event_data}")
+
+                        # Respond with Socket.IO format
+                        response = json.dumps(["response", {"status": "received", "event": event_name}])
+                        await websocket.send_text("42" + response)
+
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid Socket.IO message from {client_id}: {message}")
+
+    except WebSocketDisconnect:
+        logger.info(f"Socket.IO-compatible client {client_id} disconnected")
+    except Exception as e:
+        logger.error(f"Socket.IO WebSocket error for client {client_id}: {e}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -13,6 +13,7 @@ class ProcessingJob(Base):
     filename = Column(String(255), nullable=False)
     file_size = Column(BigInteger, nullable=False)
     file_format = Column(String(50), nullable=False)
+    destination = Column(String(50), nullable=False)
     destination_type = Column(String(50), nullable=False)
     destination_config = Column(JSON, nullable=False)
     status = Column(String(50), nullable=False, default='pending')

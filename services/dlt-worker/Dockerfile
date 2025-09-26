@@ -39,9 +39,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ================================================================================================
-# JAVA STAGE - Optimized Java installation
+# JAVA STAGE - Optimized Java installation (Debian-based for compatibility)
 # ================================================================================================
-FROM eclipse-temurin:11-jre-alpine AS java-base
+FROM eclipse-temurin:11-jre-focal AS java-base
 
 # ================================================================================================
 # PRODUCTION STAGE
@@ -66,6 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=java-base /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH=${JAVA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${JAVA_HOME}/lib:${LD_LIBRARY_PATH}
 
 # Verify Java installation
 RUN java -version
@@ -355,4 +356,4 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=3 \
     CMD python /app/healthcheck.py || exit 1
 
 # Use startup script
-CMD ["/app/start.sh"]
+CMD ["bash", "/app/start.sh"]

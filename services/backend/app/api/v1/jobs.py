@@ -68,12 +68,24 @@ async def upload_file(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid destination config JSON")
 
+    # Map destination_type to destination value for database constraint
+    destination_mapping = {
+        'postgresql': 'postgres',
+        'postgres': 'postgres',
+        'clickhouse': 'clickhouse',
+        'hdfs': 'hdfs',
+        's3': 's3'
+    }
+
+    destination = destination_mapping.get(destination_type.lower(), 'postgres')
+
     # Create processing job record
     job = ProcessingJob(
         job_id=job_id,
         filename=file.filename,
         file_size=actual_file_size,
         file_format=file_format,
+        destination=destination,
         destination_type=destination_type,
         destination_config=destination_config_dict,
         status='pending'
@@ -189,7 +201,7 @@ async def get_jobs(db: AsyncSession = Depends(get_db)):
         select(ProcessingJob).order_by(ProcessingJob.created_at.desc())
     )
     jobs = result.scalars().all()
-    return [JobResponse.from_attributes(job) for job in jobs]
+    return [JobResponse.model_validate(job) for job in jobs]
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -209,7 +221,7 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    return JobResponse.from_attributes(job)
+    return JobResponse.model_validate(job)
 
 
 @router.get("/{job_id}/status", response_model=JobStatus)
