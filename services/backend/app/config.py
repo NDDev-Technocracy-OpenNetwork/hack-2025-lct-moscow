@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # File processing
     MAX_FILE_SIZE: int = 10 * 1024 * 1024 * 1024  # 10GB
-    ALLOWED_FILE_FORMATS: list = ["csv", "json", "xml"]
+    ALLOWED_FILE_FORMATS: List[str] = ["csv", "json", "xml"]
 
     # Paths
     DATA_INPUT_PATH: str = "/app/data/input"
@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "BigData Processing API"
 
     # CORS
-    BACKEND_CORS_ORIGINS: list = [
-        "http://localhost:3000",  # React frontend
-        "http://frontend:3000",   # Docker frontend
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://frontend:3000",
+        "http://127.0.0.1:3000",
+        "*"
     ]
 
     class Config:
