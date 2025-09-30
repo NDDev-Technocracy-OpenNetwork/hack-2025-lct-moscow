@@ -372,10 +372,12 @@ async def _process_data_directly(job_id, file_path: str, file_format: str, desti
     from sqlalchemy import create_engine, text, Text
     import os
 
-    logger.info(f"Starting direct data processing for job {job_id}")
+    logger.info(f"Starting direct data processing for job {job_id} with format: {file_format}")
 
-    if file_format.lower() != 'csv':
-        raise ValueError(f"Direct processing only supports CSV files, got: {file_format}")
+    # Validate supported formats
+    supported_formats = ['csv', 'json', 'xml']
+    if file_format.lower() not in supported_formats:
+        raise ValueError(f"Direct processing only supports {supported_formats}, got: {file_format}")
 
     # Generate table name
     table_name = f"processed_data_{str(job_id).replace('-', '_')}"
@@ -385,22 +387,48 @@ async def _process_data_directly(job_id, file_path: str, file_format: str, desti
         database_url = os.getenv('DATABASE_URL', '').replace('postgresql+asyncpg://', 'postgresql://')
         sync_engine = create_engine(database_url)
 
-        # Read CSV in chunks for memory efficiency
+        # Read file in chunks for memory efficiency
         chunk_size = 10000  # Process 10k records at a time
         total_processed = 0
 
-        # Get CSV parameters and estimated total records from schema_info
+        # Get file parameters and estimated total records from schema_info
         delimiter = schema_info.get('csv_delimiter', ',')
         encoding = schema_info.get('encoding', 'utf-8')
         estimated_total = schema_info.get('total_rows', 0)
 
-        logger.info(f"Processing CSV file: {file_path} with delimiter '{delimiter}' and encoding '{encoding}', estimated {estimated_total} rows")
+        logger.info(f"Processing {file_format.upper()} file: {file_path}, encoding '{encoding}', estimated {estimated_total} rows")
 
-        # Read first chunk to create table schema - use dtype=str to read as strings
-        first_chunk = pd.read_csv(file_path, nrows=1000, delimiter=delimiter, encoding=encoding, dtype=str, low_memory=False)
+        # Read first sample to create table schema - use dtype=str to read as strings
+        if file_format.lower() == 'csv':
+            first_chunk = pd.read_csv(file_path, nrows=1000, delimiter=delimiter, encoding=encoding, dtype=str, low_memory=False)
+        elif file_format.lower() == 'json':
+            # Try JSON Lines first, then array format
+            try:
+                first_chunk = pd.read_json(file_path, lines=True, nrows=1000, encoding=encoding, dtype=str)
+            except:
+                # If JSON Lines fails, try array format
+                logger.info("JSON Lines format failed, trying array format")
+                df = pd.read_json(file_path, encoding=encoding, dtype=str)
+                first_chunk = df.head(1000)
+        elif file_format.lower() == 'xml':
+            # Read XML - pandas expects specific structure
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            # Get first 1000 records
+            records = []
+            for i, elem in enumerate(root):
+                if i >= 1000:
+                    break
+                record = {child.tag: child.text for child in elem}
+                records.append(record)
+            first_chunk = pd.DataFrame(records)
+            first_chunk = first_chunk.astype(str)
+        else:
+            raise ValueError(f"Unsupported file format: {file_format}")
 
         if first_chunk.empty:
-            logger.warning(f"CSV file is empty: {file_path}")
+            logger.warning(f"{file_format.upper()} file is empty: {file_path}")
             return 0
 
         # Clean column names (remove spaces, special characters)
@@ -419,25 +447,118 @@ async def _process_data_directly(job_id, file_path: str, file_format: str, desti
 
         logger.info(f"Created table with TEXT columns: {table_name}")
 
+        # Count actual lines/records in file for verification
+        actual_file_lines = 0
+        is_json_array = False
+        try:
+            if file_format.lower() == 'csv':
+                with open(file_path, 'r', encoding=encoding) as f:
+                    actual_file_lines = sum(1 for _ in f) - 1  # Subtract 1 for header
+            elif file_format.lower() == 'json':
+                # Check if it's JSON array or JSON Lines
+                with open(file_path, 'r', encoding=encoding) as f:
+                    first_char = f.read(1).strip()
+                    if first_char == '[':
+                        # JSON array - count by loading (no chunked support)
+                        is_json_array = True
+                        df_full = pd.read_json(file_path, encoding=encoding, dtype=str)
+                        actual_file_lines = len(df_full)
+                        logger.info(f"Detected JSON array format with {actual_file_lines} records")
+                    else:
+                        # JSON Lines format - count lines
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            actual_file_lines = sum(1 for _ in f)
+                        logger.info(f"Detected JSON Lines format with {actual_file_lines} records")
+            elif file_format.lower() == 'xml':
+                # Count XML elements
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(file_path)
+                root = tree.getroot()
+                actual_file_lines = len(root)
+            logger.info(f"Actual file record count: {actual_file_lines} data records")
+        except Exception as count_error:
+            logger.warning(f"Could not count file records: {count_error}")
+
         # Process file in chunks - read all as strings to avoid type conversion errors
-        chunk_iter = pd.read_csv(
-            file_path,
-            chunksize=chunk_size,
-            delimiter=delimiter,
-            encoding=encoding,
-            dtype=str,
-            low_memory=False
-        )
+        # Use actual file record count as the true total
+        if actual_file_lines > 0:
+            estimated_total = actual_file_lines
+            logger.info(f"Using actual file record count as total: {estimated_total} records")
 
+        # Create chunk iterator based on file format
+        if file_format.lower() == 'csv':
+            chunk_iter = pd.read_csv(
+                file_path,
+                chunksize=chunk_size,
+                delimiter=delimiter,
+                encoding=encoding,
+                dtype=str,
+                on_bad_lines='warn',  # Warn about bad lines but try to process them
+                engine='python',  # Python engine is more flexible with malformed data
+                quoting=3,  # QUOTE_NONE - don't use special quoting
+                escapechar=None  # Don't use escape characters
+                # Note: low_memory is not supported with python engine
+            )
+        elif file_format.lower() == 'json':
+            if is_json_array:
+                # JSON array - already loaded, chunk manually
+                def json_array_chunk_generator(df, chunk_size):
+                    for i in range(0, len(df), chunk_size):
+                        yield df[i:i+chunk_size]
+                chunk_iter = json_array_chunk_generator(df_full, chunk_size)
+            else:
+                # JSON Lines format - use pandas chunked reading
+                chunk_iter = pd.read_json(
+                    file_path,
+                    lines=True,  # JSON Lines format
+                    chunksize=chunk_size,
+                    encoding=encoding,
+                    dtype=str
+                )
+        elif file_format.lower() == 'xml':
+            # XML doesn't support chunked reading in pandas, so we read and chunk manually
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+
+            # Convert to chunks manually
+            def xml_chunk_generator(xml_root, chunk_size):
+                records = []
+                for elem in xml_root:
+                    record = {child.tag: child.text for child in elem}
+                    records.append(record)
+                    if len(records) >= chunk_size:
+                        df = pd.DataFrame(records)
+                        df = df.astype(str)
+                        yield df
+                        records = []
+                # Yield remaining records
+                if records:
+                    df = pd.DataFrame(records)
+                    df = df.astype(str)
+                    yield df
+
+            chunk_iter = xml_chunk_generator(root, chunk_size)
+        else:
+            raise ValueError(f"Unsupported file format: {file_format}")
+
+        skipped_chunks = 0
         for chunk_num, chunk in enumerate(chunk_iter):
-            # Clean column names to match table schema
-            chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
-                           for col in chunk.columns]
+            try:
+                # Clean column names to match table schema
+                chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
+                               for col in chunk.columns]
 
-            # Insert chunk into database - table already has TEXT columns
-            chunk.to_sql(table_name, sync_engine, if_exists='append', index=False, method='multi')
+                # Insert chunk into database - table already has TEXT columns
+                chunk.to_sql(table_name, sync_engine, if_exists='append', index=False, method='multi')
 
-            total_processed += len(chunk)
+                total_processed += len(chunk)
+            except Exception as chunk_error:
+                skipped_chunks += 1
+                logger.error(f"Failed to process chunk {chunk_num} for job {job_id}: {chunk_error}")
+                logger.error(f"Chunk size: {len(chunk)} rows - SKIPPING THIS CHUNK")
+                # Continue processing next chunks
+                continue
 
             # Calculate progress percentage
             progress_percent = round((total_processed / estimated_total * 100), 2) if estimated_total > 0 else 0
@@ -469,6 +590,26 @@ async def _process_data_directly(job_id, file_path: str, file_format: str, desti
                     logger.warning(f"Failed to save progress record: {progress_error}")
 
         logger.info(f"Direct processing completed: {total_processed} records processed for job {job_id}")
+
+        # Log data loss if any
+        if skipped_chunks > 0:
+            logger.error(f"WARNING: {skipped_chunks} chunks were skipped due to errors")
+
+        # Compare with actual file lines (most accurate)
+        if actual_file_lines > 0:
+            data_loss = actual_file_lines - total_processed
+            if data_loss > 0:
+                loss_percent = round((data_loss / actual_file_lines * 100), 2)
+                logger.error(f"DATA LOSS: {data_loss} records missing ({loss_percent}%) - File has: {actual_file_lines}, Processed: {total_processed}")
+                logger.error(f"CAUSE: Pandas is dropping rows with parsing errors or delimiter mismatches")
+            else:
+                logger.info(f"SUCCESS: All {actual_file_lines} file records processed (100% success rate)")
+        else:
+            # Fallback to estimation
+            data_loss = estimated_total - total_processed
+            if data_loss > 0:
+                loss_percent = round((data_loss / estimated_total * 100), 2)
+                logger.warning(f"DATA LOSS DETECTED: {data_loss} records missing ({loss_percent}%) - Estimated: {estimated_total}, Processed: {total_processed}")
 
         # Save final progress record
         try:
