@@ -37,7 +37,9 @@ class DDLGenerator:
         if not columns:
             raise ValueError("No columns found in schema")
 
-        if destination_type == 'postgresql':
+        # Normalize destination type
+        destination_type = destination_type.lower()
+        if destination_type in ('postgresql', 'postgres'):
             return self._generate_postgresql_ddl(columns, config)
         elif destination_type == 'clickhouse':
             return self._generate_clickhouse_ddl(columns, config)
@@ -52,9 +54,12 @@ class DDLGenerator:
         columns = schema_info.get('columns', [])
         file_format = schema_info.get('file_format', 'csv')
 
+        # Normalize destination type for dlt (uses 'postgres' not 'postgresql')
+        dlt_destination = 'postgres' if destination_type.lower() in ('postgresql', 'postgres') else destination_type.lower()
+
         script_template = f"""
 import dlt
-from dlt.destinations import {destination_type}
+from dlt.destinations import {dlt_destination}
 import pandas as pd
 from typing import Iterator, Dict, Any
 
@@ -88,7 +93,7 @@ def transform_record(record: Dict[str, Any]) -> Dict[str, Any]:
 if __name__ == "__main__":
     pipeline = dlt.pipeline(
         pipeline_name="bigdata_processing",
-        destination="{destination_type}",
+        destination="{dlt_destination}",
         dataset_name="processed_data"
     )
 

@@ -27,30 +27,30 @@ websocket_manager = WebSocketManager()
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
-    logger.info("Starting BigData Processing API...")
+    logger.info("Application startup initiated")
 
     try:
         # Create database tables
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created successfully")
+        logger.info("Database tables initialized")
     except Exception as e:
-        logger.error(f"Failed to create database tables: {e}")
+        logger.error(f"Database initialization failed: {e}")
 
-    # Add managers to app state
+    # Initialize application state
     app.state.websocket_manager = websocket_manager
 
     logger.info("Application startup completed")
     yield
 
     # Shutdown
-    logger.info("Shutting down BigData Processing API...")
+    logger.info("Application shutdown initiated")
 
 
-# Create FastAPI application
+# Initialize FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="API for processing large files with multiple destinations",
+    description="REST API for distributed file processing with configurable destinations",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -60,7 +60,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -163,12 +163,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Startup message
+# Startup logging
 @app.on_event("startup")
 async def startup_message():
-    logger.info(f"🚀 {settings.PROJECT_NAME} is running!")
-    logger.info(f"📖 API Documentation: http://localhost:8000/docs")
-    logger.info(f"🔌 WebSocket URL: ws://localhost:8000/ws/{{client_id}}")
+    logger.info(f"{settings.PROJECT_NAME} started successfully")
+    logger.info("API Documentation: http://localhost:8000/docs")
+    logger.info("WebSocket endpoint: ws://localhost:8000/ws/{client_id}")
 
 
 # Socket.IO compatibility endpoint

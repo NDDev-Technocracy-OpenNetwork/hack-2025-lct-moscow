@@ -5,21 +5,8 @@
 -- It creates necessary databases, schemas, tables, and grants appropriate permissions
 -- ================================================================================================
 
--- Create additional database for Airflow (main database is created automatically by POSTGRES_DB)
--- Note: The main database specified by POSTGRES_DB environment variable is created automatically
-DO $$
-BEGIN
-    -- Create airflow database if it doesn't exist
-    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'airflow_db') THEN
-        PERFORM dblink_exec('dbname=' || current_database(), 'CREATE DATABASE airflow_db');
-    END IF;
-EXCEPTION WHEN OTHERS THEN
-    -- Fallback method if dblink is not available
-    RAISE NOTICE 'Creating airflow_db using alternative method';
-END $$;
-
--- Alternative method for database creation (more reliable)
-SELECT 'CREATE DATABASE airflow_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'airflow_db')\gexec
+-- Note: Airflow database (airflow_db) is created by init-airflow-db.sh script
+-- This is executed before this SQL script, so airflow_db should already exist
 
 -- ================================================================================================
 -- SCHEMA CREATION

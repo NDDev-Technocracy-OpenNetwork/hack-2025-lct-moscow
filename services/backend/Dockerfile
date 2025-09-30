@@ -1,9 +1,5 @@
-# ================================================================================================
-# BIGDATA PROCESSING SYSTEM - BACKEND DOCKERFILE (PRODUCTION)
-# ================================================================================================
-# Production-optimized FastAPI application with security hardening
-# Multi-stage build for minimal image size and maximum security
-# ================================================================================================
+# Backend Dockerfile
+# Multi-stage build for FastAPI application
 
 FROM python:3.11-slim as base
 
@@ -14,9 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# ================================================================================================
-# DEPENDENCIES STAGE
-# ================================================================================================
+# Dependencies stage
 FROM base AS dependencies
 
 # Install system dependencies required for Python packages
@@ -38,9 +32,7 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r /tmp/requirements.txt
 
-# ================================================================================================
-# PRODUCTION STAGE
-# ================================================================================================
+# Production stage
 FROM base AS production
 
 # Install only runtime dependencies
@@ -78,9 +70,9 @@ RUN mkdir -p /app/data/{input,temp,processed} \
 
 # Create production configuration file
 RUN cat > /app/gunicorn.conf.py << 'EOF'
-# ================================================================================================
+
 # GUNICORN PRODUCTION CONFIGURATION
-# ================================================================================================
+
 import multiprocessing
 import os
 
@@ -95,13 +87,13 @@ worker_connections = 1000
 max_requests = 10000
 max_requests_jitter = 1000
 preload_app = True
-timeout = 120
+timeout = 600
 keepalive = 2
 
 # Security
 limit_request_line = 0
 limit_request_fields = 100
-limit_request_field_size = 8190
+limit_request_field_size = 0
 
 # Application
 wsgi_file = "app.main:app"

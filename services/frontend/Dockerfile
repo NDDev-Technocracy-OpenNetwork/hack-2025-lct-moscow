@@ -1,13 +1,13 @@
-# ================================================================================================
-# BIGDATA PROCESSING SYSTEM - FRONTEND DOCKERFILE (PRODUCTION)
-# ================================================================================================
-# Multi-stage build for optimized production React application
-# Uses nginx for high-performance static file serving
-# ================================================================================================
 
-# ================================================================================================
-# BUILD STAGE
-# ================================================================================================
+# Frontend Dockerfile
+
+# Multi-stage build for React application
+# Static file serving with nginx
+
+
+
+# Build stage
+
 FROM node:18-alpine AS builder
 
 # Set working directory
@@ -29,12 +29,20 @@ RUN npm install --include=dev --no-audit --no-fund
 # Copy source code and configuration files
 COPY . .
 
+# Accept build arguments for Vite environment variables
+ARG VITE_API_URL
+ARG VITE_WS_URL
+
+# Set as environment variables for Vite build process
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_WS_URL=${VITE_WS_URL}
+
 # Build the application for production
 RUN npm run build
 
-# ================================================================================================
-# PRODUCTION STAGE
-# ================================================================================================
+
+# Production stage
+
 FROM nginx:1.24-alpine AS production
 
 # Install curl for health checks
@@ -48,9 +56,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Create nginx configuration for React SPA
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
-# ================================================================================================
+
 # NGINX CONFIGURATION FOR REACT SPA
-# ================================================================================================
+
 server {
     listen 3000;
     server_name _;
@@ -169,9 +177,7 @@ http {
 }
 EOF
 
-# Create startup script to handle environment variable substitution
-RUN printf '#!/bin/sh\nset -e\n\n# Replace environment variables in nginx config\nif [ -n "$REACT_APP_API_URL" ]; then\n    sed -i "s|\\${REACT_APP_API_URL}|$REACT_APP_API_URL|g" /etc/nginx/conf.d/default.conf\nfi\n\nif [ -n "$REACT_APP_WS_URL" ]; then\n    sed -i "s|\\${REACT_APP_WS_URL}|$REACT_APP_WS_URL|g" /etc/nginx/conf.d/default.conf\nfi\n\n# Start nginx\nexec "$@"\n' > /docker-entrypoint.sh && \
-    chmod +x /docker-entrypoint.sh
+# No runtime environment substitution needed - Vite bakes values at build time
 
 # Set proper ownership and permissions
 RUN chown -R nginx:nginx /usr/share/nginx/html && \
@@ -185,9 +191,6 @@ EXPOSE 3000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
-
-# Use startup script as entrypoint
-ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]

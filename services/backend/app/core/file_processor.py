@@ -85,10 +85,15 @@ class FileProcessor:
             return 'application/octet-stream'
 
     async def _analyze_csv(self, file_path: str, encoding: str) -> Dict[str, Any]:
-        """Analyze CSV file structure"""
+        """Analyze CSV file structure with optimizations for large files"""
+
+        logger.info(f"Starting CSV analysis for: {file_path}")
 
         # First, detect delimiter and other CSV parameters
         delimiter, quotechar = self._detect_csv_params(file_path, encoding)
+
+        # Initialize variables
+        total_rows = None
 
         # Read sample for analysis
         try:
@@ -101,24 +106,48 @@ class FileProcessor:
                 low_memory=False
             )
 
-            # Get total row count (approximately)
+            # Get total row count (approximately) - this can be slow for large files
+            logger.info(f"Starting row count estimation...")
             total_rows = self._count_csv_rows(file_path, encoding, delimiter)
+            logger.info(f"CSV analysis: sample rows={len(df_sample)}, total_rows={total_rows}")
 
         except Exception as e:
             logger.error(f"Error reading CSV file: {e}")
-            # Try with different parameters
-            df_sample = pd.read_csv(file_path, encoding=encoding, nrows=self.sample_size)
-            total_rows = None
+            try:
+                # Try with different parameters
+                df_sample = pd.read_csv(file_path, encoding=encoding, nrows=self.sample_size)
+                total_rows = None
+                logger.info(f"CSV fallback: sample rows={len(df_sample)}, total_rows=None")
+            except Exception as e2:
+                logger.error(f"CSV fallback also failed: {e2}")
+                raise e2
 
         columns = []
         sample_data = []
 
-        for col in df_sample.columns:
-            col_info = self._analyze_column(df_sample[col], col)
-            columns.append(col_info)
+        try:
+            logger.info(f"Analyzing {len(df_sample.columns)} columns...")
+            for i, col in enumerate(df_sample.columns):
+                col_info = self._analyze_column(df_sample[col], col)
+                columns.append(col_info)
+                if (i + 1) % 10 == 0:  # Log progress every 10 columns
+                    logger.info(f"Analyzed {i + 1}/{len(df_sample.columns)} columns")
+            logger.info(f"Analyzed {len(columns)} columns successfully")
+        except Exception as e:
+            logger.error(f"Error analyzing columns: {e}")
+            raise e
 
-        # Get sample data (first 10 rows)
-        sample_data = df_sample.head(10).to_dict('records')
+        try:
+            # Get sample data (first 10 rows) and clean NaN values IMMEDIATELY
+            df_subset = df_sample.head(10)
+            # Replace NaN values manually using numpy
+            import numpy as np
+            df_clean = df_subset.replace([np.nan, np.inf, -np.inf], None)
+            sample_data = df_clean.to_dict('records')
+            logger.info(f"Generated {len(sample_data)} clean sample records (NaN->None)")
+        except Exception as e:
+            logger.error(f"Error generating sample data: {e}")
+            raise e
 
         return {
             "columns": columns,
@@ -214,14 +243,73 @@ class FileProcessor:
             return ',', '"'
 
     def _count_csv_rows(self, file_path: str, encoding: str, delimiter: str) -> Optional[int]:
-        """Count total rows in CSV file efficiently"""
+        """Count total rows in CSV file efficiently (with fast estimation for large files)"""
         try:
-            with open(file_path, 'r', encoding=encoding) as file:
-                reader = csv.reader(file, delimiter=delimiter)
-                row_count = sum(1 for row in reader) - 1  # Subtract header
-                return max(0, row_count)
-        except Exception:
-            return None
+            file_size = os.path.getsize(file_path)
+            logger.info(f"Counting rows for file size: {file_size / (1024*1024):.1f}MB")
+
+            # For very large files (> 100MB), use fast estimation
+            if file_size > 100 * 1024 * 1024:
+                logger.info(f"Large file detected, using fast estimation")
+                with open(file_path, 'r', encoding=encoding) as file:
+                    # Read just a small sample to estimate
+                    sample_size = 8192  # 8KB sample
+                    header = file.readline()
+                    sample = file.read(sample_size)
+
+                    if not sample:
+                        return 1
+
+                    # Simple line count in sample
+                    lines_in_sample = sample.count('\n')
+                    if lines_in_sample > 0:
+                        # Rough estimation: file_size / average_line_size
+                        avg_line_size = len(sample) / lines_in_sample
+                        estimated_rows = int(file_size / avg_line_size)
+                        logger.info(f"Fast estimation: ~{estimated_rows} rows")
+                        return max(0, estimated_rows)
+                    return 1000  # Default fallback
+
+            # For medium files (10MB - 100MB), use moderate estimation
+            elif file_size > 10 * 1024 * 1024:
+                logger.info(f"Medium file detected, using moderate estimation")
+                with open(file_path, 'r', encoding=encoding) as file:
+                    # Count first 1000 lines to get average line size
+                    line_count = 0
+                    bytes_read = 0
+
+                    for line in file:
+                        line_count += 1
+                        bytes_read += len(line.encode(encoding))
+                        if line_count >= 1000:
+                            break
+
+                    if line_count > 0:
+                        avg_line_size = bytes_read / line_count
+                        estimated_rows = int(file_size / avg_line_size) - 1  # Subtract header
+                        logger.info(f"Moderate estimation: ~{estimated_rows} rows")
+                        return max(0, estimated_rows)
+                    return 1000  # Default fallback
+
+            # For small files (< 10MB), count exactly
+            else:
+                logger.info(f"Small file detected, counting exactly")
+                with open(file_path, 'r', encoding=encoding) as file:
+                    reader = csv.reader(file, delimiter=delimiter)
+                    row_count = sum(1 for row in reader) - 1  # Subtract header
+                    logger.info(f"Exact count: {row_count} rows")
+                    return max(0, row_count)
+
+        except Exception as e:
+            logger.warning(f"Could not count rows, using fallback: {e}")
+            # Return a reasonable default based on file size
+            try:
+                file_size = os.path.getsize(file_path)
+                fallback_estimate = max(1000, int(file_size / 200))  # Assume ~200 bytes per row
+                logger.info(f"Fallback estimation: {fallback_estimate} rows")
+                return fallback_estimate
+            except:
+                return 10000  # Final fallback
 
     def _analyze_column(self, series: pd.Series, column_name: str) -> ColumnInfo:
         """Analyze individual column characteristics"""

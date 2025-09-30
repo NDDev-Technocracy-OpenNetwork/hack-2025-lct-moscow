@@ -1,11 +1,10 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from uuid import UUID
 
 
 class FileUploadResponse(BaseModel):
-    job_id: UUID
+    job_id: str
     filename: str
     file_size: int
     file_format: str
@@ -21,7 +20,7 @@ class ColumnInfo(BaseModel):
 
 
 class FileAnalysisResponse(BaseModel):
-    job_id: UUID
+    job_id: str
     filename: str
     file_size: int
     file_format: str
@@ -34,15 +33,20 @@ class FileAnalysisResponse(BaseModel):
 
 class FileMetadataResponse(BaseModel):
     id: int
-    job_id: UUID
+    job_id: str
     original_filename: str
     file_path: str
     file_size: int
     mime_type: Optional[str] = None
     encoding: Optional[str] = None
-    columns_detected: Optional[Dict[str, Any]] = None
-    sample_data: Optional[Dict[str, Any]] = None
-    schema_info: Optional[Dict[str, Any]] = None
+    delimiter: Optional[str] = None
+    quote_char: Optional[str] = None
+    escape_char: Optional[str] = None
+    header_row: bool = False
+    columns_detected: Optional[List] = None
+    sample_data: Optional[List] = None
+    data_quality_score: Optional[float] = None
+    schema_validation_errors: Optional[List] = None
     created_at: datetime
 
     class Config:

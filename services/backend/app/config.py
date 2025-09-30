@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List
+import os
 
 
 class Settings(BaseSettings):
@@ -35,15 +36,18 @@ class Settings(BaseSettings):
 
     # API
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "BigData Processing API"
+    PROJECT_NAME: str = "Data Processing API"
 
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://frontend:3000",
-        "http://127.0.0.1:3000",
-        "*"
-    ]
+    # CORS - configurable via environment variable
+    BACKEND_CORS_ORIGINS: str = os.getenv(
+        "BACKEND_CORS_ORIGINS",
+        "http://localhost:3000,http://frontend:3000,http://127.0.0.1:3000,*"
+    )
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Convert comma-separated CORS origins string to list"""
+        return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",")]
 
     class Config:
         env_file = ".env"
