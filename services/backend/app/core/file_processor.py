@@ -202,8 +202,16 @@ class FileProcessor:
         }
 
     async def _analyze_xml(self, file_path: str, encoding: str) -> Dict[str, Any]:
-        """Analyze XML file structure"""
+        """Analyze XML file structure with streaming for large files"""
 
+        file_size = os.path.getsize(file_path)
+        is_large_file = file_size > 50 * 1024 * 1024  # 50MB threshold
+
+        if is_large_file:
+            logger.info(f"Large XML file detected ({file_size / (1024*1024):.1f}MB), using streaming parser")
+            return await self._analyze_xml_streaming(file_path, encoding)
+
+        # For small files, use the original method
         with open(file_path, 'r', encoding=encoding) as file:
             content = file.read()
 
@@ -230,6 +238,76 @@ class FileProcessor:
             "xml_root_element": root.tag,
             "xml_structure": self._describe_xml_structure(root)
         }
+
+    async def _analyze_xml_streaming(self, file_path: str, encoding: str) -> Dict[str, Any]:
+        """Analyze large XML files using streaming parser"""
+        import xml.etree.ElementTree as ET
+
+        logger.info(f"Starting streaming XML analysis")
+        records = []
+        root_tag = None
+        record_tag = None
+        total_elements = 0
+
+        # Use iterparse for memory-efficient parsing
+        context = ET.iterparse(file_path, events=('start', 'end'))
+        context = iter(context)
+
+        try:
+            event, root = next(context)
+            root_tag = root.tag
+            logger.info(f"XML root element: {root_tag}")
+
+            # Find first repeating child element
+            for event, elem in context:
+                if event == 'end':
+                    if elem.tag != root_tag and record_tag is None:
+                        # First child element becomes the record pattern
+                        record_tag = elem.tag
+                        logger.info(f"Detected record element: {record_tag}")
+
+                    if elem.tag == record_tag:
+                        total_elements += 1
+
+                        # Only collect sample records
+                        if len(records) < self.sample_size:
+                            record = self._xml_element_to_dict(elem)
+                            records.append(record)
+
+                            if len(records) % 100 == 0:
+                                logger.info(f"Collected {len(records)} sample records...")
+
+                        # Clear element to free memory
+                        elem.clear()
+
+                        # Stop after collecting enough samples
+                        if len(records) >= self.sample_size:
+                            # Continue counting only
+                            for event, elem in context:
+                                if event == 'end' and elem.tag == record_tag:
+                                    total_elements += 1
+                                    elem.clear()
+
+                                    if total_elements % 1000 == 0:
+                                        logger.info(f"Counted {total_elements} total records...")
+                            break
+
+            logger.info(f"XML analysis complete: {len(records)} samples, {total_elements} total records")
+
+            # Extract schema from sample records
+            columns = self._extract_xml_schema(records[:self.sample_size])
+
+            return {
+                "columns": columns,
+                "sample_data": records[:10],
+                "total_rows": total_elements,
+                "xml_root_element": root_tag,
+                "xml_structure": f"Root: {root_tag}, Records: {record_tag}, Count: {total_elements}"
+            }
+
+        except Exception as e:
+            logger.error(f"Error in streaming XML analysis: {e}")
+            raise ValueError(f"Failed to parse XML file: {e}")
 
     def _detect_csv_params(self, file_path: str, encoding: str) -> Tuple[str, str]:
         """Detect CSV delimiter and quote character"""
