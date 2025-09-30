@@ -167,8 +167,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_message():
     logger.info(f"{settings.PROJECT_NAME} started successfully")
-    logger.info("API Documentation: http://localhost:8000/docs")
-    logger.info("WebSocket endpoint: ws://localhost:8000/ws/{client_id}")
+    logger.info("API Documentation available at /docs")
+    logger.info("WebSocket endpoint available at /ws/{{client_id}}")
 
 
 # Socket.IO compatibility endpoint

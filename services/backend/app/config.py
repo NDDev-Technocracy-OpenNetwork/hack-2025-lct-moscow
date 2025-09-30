@@ -5,7 +5,7 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://bigdata_user:bigdata_pass@postgres:5432/bigdata_db"
+    DATABASE_URL: str
 
     # Redis
     REDIS_URL: str = "redis://redis:6379"
@@ -13,12 +13,12 @@ class Settings(BaseSettings):
     # Airflow
     AIRFLOW_BASE_URL: str = "http://airflow-webserver:8080"
     AIRFLOW_USERNAME: str = "admin"
-    AIRFLOW_PASSWORD: str = "admin123"
+    AIRFLOW_PASSWORD: str
 
     # ClickHouse
     CLICKHOUSE_URL: str = "http://clickhouse:8123"
     CLICKHOUSE_USER: str = "bigdata_user"
-    CLICKHOUSE_PASSWORD: str = "bigdata_pass"
+    CLICKHOUSE_PASSWORD: str
     CLICKHOUSE_DATABASE: str = "analytics"
 
     # HDFS
@@ -38,11 +38,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Data Processing API"
 
-    # CORS - configurable via environment variable
-    BACKEND_CORS_ORIGINS: str = os.getenv(
-        "BACKEND_CORS_ORIGINS",
-        "http://localhost:3000,http://frontend:3000,http://127.0.0.1:3000,*"
-    )
+    # CORS origins from environment variable
+    BACKEND_CORS_ORIGINS: str = os.getenv("BACKEND_CORS_ORIGINS", "http://frontend:3000")
 
     @property
     def cors_origins_list(self) -> List[str]:

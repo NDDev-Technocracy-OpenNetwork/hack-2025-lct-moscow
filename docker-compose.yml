@@ -68,12 +68,14 @@ services:
       - "8000"
     environment:
       - PYTHONPATH=/app
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://bigdata_user:bigdata_pass@postgres:5432/bigdata_db}
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD}
       - CLICKHOUSE_URL=${CLICKHOUSE_URL:-http://clickhouse:8123/default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - HDFS_NAMENODE_URL=${HDFS_NAMENODE_URL:-hdfs://namenode:9000}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3000,http://frontend:3000}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://frontend:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,7 +136,7 @@ services:
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-bigdata_db}
       - POSTGRES_USER=${POSTGRES_USER:-bigdata_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bigdata_pass}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
       - "5432:5432"

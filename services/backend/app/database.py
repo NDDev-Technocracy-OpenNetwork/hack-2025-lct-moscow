@@ -4,7 +4,9 @@ from sqlalchemy.pool import NullPool
 import os
 
 # Get database URL from environment and ensure it's async
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://bigdata_user:bigdata_pass@postgres:5432/bigdata_db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 
 # Ensure the URL uses asyncpg driver
 if DATABASE_URL.startswith("postgresql://"):
