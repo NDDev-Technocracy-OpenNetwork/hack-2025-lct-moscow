@@ -191,3 +191,18 @@ logs/
 
 # Claude Code files
 .claude/
+.clinerules
+*.claude.md
+claude_artifacts/
+.claudesession/
+
+# Temporary and backup files
+*.tmp
+*.bak
+*.backup
+*.old
+*~
+
+# Frontend build artifacts
+services/frontend/dist/
+services/frontend/.vite/
