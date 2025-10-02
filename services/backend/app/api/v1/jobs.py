@@ -474,7 +474,7 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
     # Get file parameters
     delimiter = schema_info.get('csv_delimiter', ',')
     encoding = schema_info.get('encoding', 'utf-8')
-    chunk_size = 5000  # Process 5k records at a time
+    chunk_size = 10000  # Larger chunks for better performance (was 5000)
 
     logger.info(f"[SYNC] Processing {file_format.upper()} file: {file_path}, encoding '{encoding}'")
 
@@ -668,13 +668,16 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
 
             with pg_conn.cursor() as cursor:
                 cursor.copy_expert(copy_sql, text_buffer)
+
+            # Commit every 5 chunks for better performance (was every chunk)
+            if chunk_num % 5 == 0:
                 pg_conn.commit()
 
             total_processed += len(chunk)
             last_chunk_num = chunk_num
 
-            # Log and publish progress every 2 chunks (more frequent updates)
-            if chunk_num % 2 == 0:
+            # Log and publish progress every 5 chunks (reduced overhead)
+            if chunk_num % 5 == 0:
                 progress_percent = round((total_processed / estimated_total * 100), 2) if estimated_total > 0 else 0
                 logger.info(f"[SYNC] Chunk {chunk_num}: {total_processed}/{estimated_total} ({progress_percent}%)")
 
@@ -723,6 +726,9 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
             skipped_chunks += 1
             logger.error(f"[SYNC] Chunk {chunk_num} failed: {chunk_error}")
             continue
+
+    # Final commit for any remaining uncommitted chunks
+    pg_conn.commit()
 
     # Always publish final progress (ensure 100% is shown)
     if total_processed > 0:
