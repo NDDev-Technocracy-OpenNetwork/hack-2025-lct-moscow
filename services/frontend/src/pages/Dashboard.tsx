@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import {
   Box,
   Grid,
@@ -24,6 +24,7 @@ import {
   Cancel as CancelIcon,
   Refresh as RefreshIcon,
   PlayArrow as PlayIcon,
+  AccountTree as PipelineIcon,
 } from '@mui/icons-material'
 import { useNavigate } from 'react-router-dom'
 import { useJobStore } from '../store/jobStore'
@@ -39,11 +40,68 @@ export const Dashboard: React.FC = () => {
     fetchJobs,
     cancelJob,
     clearError,
+    subscribeToJob,
+    unsubscribeFromJob,
   } = useJobStore()
+
+  // Track current jobs in ref to avoid recreating interval
+  const jobsRef = useRef(jobs)
+  jobsRef.current = jobs
 
   useEffect(() => {
     fetchJobs()
+
+    // Fallback polling every 30 seconds (only if WebSocket fails)
+    // WebSocket should handle real-time updates
+    const interval = setInterval(() => {
+      const hasProcessingJobs = jobsRef.current.some(job =>
+        ['pending', 'processing', 'analyzing'].includes(job.status)
+      )
+      if (hasProcessingJobs) {
+        fetchJobs()
+      }
+    }, 30000)
+
+    return () => clearInterval(interval)
   }, [fetchJobs])
+
+  // Track subscribed jobs to avoid re-subscribing
+  const subscribedJobs = useRef<Set<string>>(new Set())
+
+  // Get processing job IDs
+  const processingJobIds = useMemo(() => {
+    return jobs
+      .filter(job => ['pending', 'processing', 'analyzing'].includes(job.status))
+      .map(job => job.job_id)
+  }, [jobs])
+
+  // Subscribe to real-time updates for processing jobs
+  useEffect(() => {
+    const currentSubscribed = subscribedJobs.current
+
+    // Subscribe to new jobs
+    processingJobIds.forEach(jobId => {
+      if (!currentSubscribed.has(jobId)) {
+        console.log('[Dashboard] Subscribing to job:', jobId)
+        subscribeToJob(jobId)
+        currentSubscribed.add(jobId)
+      }
+    })
+
+    // Unsubscribe from jobs no longer processing
+    const toUnsubscribe: string[] = []
+    currentSubscribed.forEach(jobId => {
+      if (!processingJobIds.includes(jobId)) {
+        toUnsubscribe.push(jobId)
+      }
+    })
+
+    toUnsubscribe.forEach(jobId => {
+      console.log('[Dashboard] Unsubscribing from job:', jobId)
+      unsubscribeFromJob(jobId)
+      currentSubscribed.delete(jobId)
+    })
+  }, [processingJobIds, subscribeToJob, unsubscribeFromJob])
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -271,22 +329,29 @@ export const Dashboard: React.FC = () => {
                           />
                         </TableCell>
                         <TableCell>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            {progress > 0 && (
-                              <>
-                                <LinearProgress
-                                  variant="determinate"
-                                  value={progress}
-                                  sx={{ width: 80, height: 6 }}
-                                />
-                                <Typography variant="caption">
-                                  {Math.round(progress)}%
-                                </Typography>
-                              </>
+                          <Box display="flex" flexDirection="column" gap={0.5}>
+                            {status && status.current_stage && (
+                              <Typography variant="caption" color="textSecondary" sx={{ fontSize: '0.7rem' }}>
+                                {status.current_stage}
+                              </Typography>
                             )}
-                            {status && (
-                              <Typography variant="caption" color="textSecondary">
-                                {status.records_processed} / {status.records_total || 0}
+                            <Box display="flex" alignItems="center" gap={1}>
+                              {(progress > 0 || (status && status.progress_percentage > 0)) && (
+                                <>
+                                  <LinearProgress
+                                    variant="determinate"
+                                    value={status?.progress_percentage || progress}
+                                    sx={{ width: 80, height: 6 }}
+                                  />
+                                  <Typography variant="caption" fontWeight="medium">
+                                    {Math.round(status?.progress_percentage || progress)}%
+                                  </Typography>
+                                </>
+                              )}
+                            </Box>
+                            {status && status.records_total > 0 && (
+                              <Typography variant="caption" color="textSecondary" sx={{ fontSize: '0.7rem' }}>
+                                {status.records_processed.toLocaleString()} / {status.records_total.toLocaleString()}
                               </Typography>
                             )}
                           </Box>
@@ -311,6 +376,14 @@ export const Dashboard: React.FC = () => {
                               onClick={() => navigate(`/flow/${job.job_id}`)}
                             >
                               <PlayIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Pipeline Visualization">
+                            <IconButton
+                              size="small"
+                              onClick={() => navigate(`/pipeline/${job.job_id}`)}
+                            >
+                              <PipelineIcon />
                             </IconButton>
                           </Tooltip>
                           {['pending', 'processing', 'analyzing'].includes(job.status) && (

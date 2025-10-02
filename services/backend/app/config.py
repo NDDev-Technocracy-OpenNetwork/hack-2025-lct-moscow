@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379"
 
     # Airflow
-    AIRFLOW_BASE_URL: str = "http://airflow-webserver:8080"
+    AIRFLOW_BASE_URL: str = "http://airflow:8080"
     AIRFLOW_USERNAME: str = "admin"
     AIRFLOW_PASSWORD: str
 

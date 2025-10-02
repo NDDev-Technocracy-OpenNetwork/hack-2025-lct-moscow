@@ -99,10 +99,11 @@ async def upload_file(
     await db.commit()
     await db.refresh(job)
 
-    # Start background processing
-    logger.info(f"Adding background task for job {job_id}")
-    background_tasks.add_task(process_file_background_wrapper, job_id, file_path, file_format, destination, destination_config_dict)
-    logger.info(f"Background task added for job {job_id}")
+    # Start background processing using asyncio.create_task (runs in main event loop)
+    logger.info(f"Starting background processing for job {job_id}")
+    import asyncio
+    asyncio.create_task(process_file_background(job_id, file_path, file_format, destination, destination_config_dict))
+    logger.info(f"Background task started for job {job_id}")
 
     return FileUploadResponse(
         job_id=job_id,
@@ -111,28 +112,6 @@ async def upload_file(
         file_format=file_format,
         message="File uploaded successfully, processing started"
     )
-
-
-def process_file_background_wrapper(job_id: str, file_path: str, file_format: str, destination: str, destination_config: dict):
-    """Synchronous wrapper for background task"""
-    import asyncio
-    import traceback
-
-    logger.info(f"Background wrapper started for job {job_id}")
-
-    try:
-        # Create new event loop for background task
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        # Run the async function
-        loop.run_until_complete(process_file_background(job_id, file_path, file_format, destination, destination_config))
-        logger.info(f"Background processing completed for job {job_id}")
-    except Exception as e:
-        logger.error(f"Background processing failed for job {job_id}: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-    finally:
-        loop.close()
 
 
 async def process_file_background(job_id: str, file_path: str, file_format: str, destination: str, destination_config: dict):
@@ -153,9 +132,54 @@ async def process_file_background(job_id: str, file_path: str, file_format: str,
             await db.commit()
             logger.info(f"Job status updated to processing for {job_id}")
 
+            # Publish File Analysis start via Redis
+            import redis.asyncio as aioredis
+            import json
+            import os
+            redis_client = aioredis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0'), decode_responses=True)
+            try:
+                progress_data = {
+                    'job_id': job_id,
+                    'type': 'progress_update',
+                    'data': {
+                        'status': 'processing',
+                        'stage': 'File Analysis',
+                        'progress_percent': 10.0,
+                        'records_processed': 0,
+                        'total_records': 0,
+                        'message': 'Analyzing file structure...'
+                    },
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                await redis_client.publish(f'job_progress:{job_id}', json.dumps(progress_data))
+                logger.info(f"Published File Analysis start to Redis for {job_id}")
+            finally:
+                await redis_client.close()
+
             # Analyze file
             file_processor = FileProcessor()
             schema_info = await file_processor.analyze_file(file_path, file_format)
+
+            # Publish DDL Generation start via Redis
+            redis_client = aioredis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0'), decode_responses=True)
+            try:
+                progress_data = {
+                    'job_id': job_id,
+                    'type': 'progress_update',
+                    'data': {
+                        'status': 'processing',
+                        'stage': 'DDL Generation',
+                        'progress_percent': 30.0,
+                        'records_processed': 0,
+                        'total_records': 0,
+                        'message': 'Generating DDL and ETL scripts...'
+                    },
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                await redis_client.publish(f'job_progress:{job_id}', json.dumps(progress_data))
+                logger.info(f"Published DDL Generation start to Redis for {job_id}")
+            finally:
+                await redis_client.close()
 
             # Generate DDL and ETL scripts
             logger.info(f"Generating DDL and ETL scripts for job {job_id}")
@@ -173,6 +197,29 @@ async def process_file_background(job_id: str, file_path: str, file_format: str,
                 )
                 await db.commit()
                 logger.info(f"Saved DDL and ETL scripts for job {job_id} (rows affected: {result.rowcount})")
+
+                # Publish DDL/ETL available event via Redis
+                redis_client = aioredis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0'), decode_responses=True)
+                try:
+                    progress_data = {
+                        'job_id': job_id,
+                        'type': 'progress_update',
+                        'data': {
+                            'status': 'processing',
+                            'stage': 'DDL Generated',
+                            'progress_percent': 40.0,
+                            'records_processed': 0,
+                            'total_records': 0,
+                            'message': 'DDL and ETL scripts generated',
+                            'ddl_script': ddl_script,
+                            'etl_script': etl_script
+                        },
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    await redis_client.publish(f'job_progress:{job_id}', json.dumps(progress_data))
+                    logger.info(f"Published DDL Generated event to Redis for {job_id}")
+                finally:
+                    await redis_client.close()
             except Exception as save_error:
                 logger.error(f"Failed to save DDL/ETL scripts: {save_error}")
                 # Continue processing even if script save fails
@@ -335,6 +382,27 @@ async def process_file_background(job_id: str, file_path: str, file_format: str,
                     await db.commit()
                     logger.info(f"Job {job_id} completed successfully with {records_processed} records processed")
 
+                    # Publish job completed event via Redis
+                    redis_client = aioredis.from_url(os.getenv('REDIS_URL', 'redis://redis:6379/0'), decode_responses=True)
+                    try:
+                        progress_data = {
+                            'job_id': job_id,
+                            'type': 'job_completed',
+                            'data': {
+                                'status': 'completed',
+                                'stage': 'Completed',
+                                'progress_percent': 100.0,
+                                'records_processed': records_processed,
+                                'total_records': records_processed,
+                                'message': f'Job completed successfully: {records_processed} records processed'
+                            },
+                            'timestamp': datetime.utcnow().isoformat()
+                        }
+                        await redis_client.publish(f'job_progress:{job_id}', json.dumps(progress_data))
+                        logger.info(f"Published job completed event to Redis for {job_id}")
+                    finally:
+                        await redis_client.close()
+
                 except Exception as etl_error:
                     logger.error(f"Fallback ETL failed for job {job_id}: {etl_error}")
                     await db.execute(
@@ -366,10 +434,372 @@ async def process_file_background(job_id: str, file_path: str, file_format: str,
                 logger.error(f"Failed to update job status: {db_error}")
 
 
+def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table_name: str, schema_info: dict, database_url: str) -> dict:
+    """Pure synchronous function for pandas processing - runs in thread pool to avoid event loop conflicts"""
+    import pandas as pd
+    from sqlalchemy import create_engine, text
+    from datetime import datetime
+    import os
+    import xml.etree.ElementTree as ET
+    import psycopg2
+    from psycopg2.extras import execute_values
+    from urllib.parse import urlparse
+    import redis
+    import json
+
+    # Disable pandas/numpy multithreading to prevent segfaults
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+    os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+
+    # Create synchronous database engine for DDL and progress tracking
+    sync_engine = create_engine(database_url)
+
+    # Create synchronous Redis client for real-time progress updates
+    redis_url = os.getenv('REDIS_URL', 'redis://redis:6379/0')
+    redis_client = redis.from_url(redis_url, decode_responses=True)
+
+    # Parse database URL for direct psycopg2 connection (faster, no SEGFAULT)
+    parsed = urlparse(database_url)
+    pg_conn = psycopg2.connect(
+        host=parsed.hostname,
+        port=parsed.port,
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path[1:]  # Remove leading /
+    )
+
+    # Get file parameters
+    delimiter = schema_info.get('csv_delimiter', ',')
+    encoding = schema_info.get('encoding', 'utf-8')
+    chunk_size = 5000  # Process 5k records at a time
+
+    logger.info(f"[SYNC] Processing {file_format.upper()} file: {file_path}, encoding '{encoding}'")
+
+    # Read first sample to create table schema
+    if file_format.lower() == 'csv':
+        first_chunk = pd.read_csv(file_path, nrows=1000, delimiter=delimiter, encoding=encoding, dtype=str, low_memory=False)
+    elif file_format.lower() == 'json':
+        try:
+            first_chunk = pd.read_json(file_path, lines=True, nrows=1000, encoding=encoding, dtype=str)
+        except:
+            logger.info("[SYNC] JSON Lines format failed, trying array format")
+            df = pd.read_json(file_path, encoding=encoding, dtype=str)
+            first_chunk = df.head(1000)
+    elif file_format.lower() == 'xml':
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        records = []
+        for i, elem in enumerate(root):
+            if i >= 1000:
+                break
+            record = {child.tag: child.text for child in elem}
+            records.append(record)
+        first_chunk = pd.DataFrame(records)
+        first_chunk = first_chunk.astype(str)
+    else:
+        raise ValueError(f"Unsupported file format: {file_format}")
+
+    if first_chunk.empty:
+        logger.warning(f"[SYNC] File is empty: {file_path}")
+        return {'total_processed': 0, 'skipped_chunks': 0, 'estimated_total': 0}
+
+    # Clean column names
+    first_chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
+                          for col in first_chunk.columns]
+
+    # Create table with TEXT columns
+    columns_ddl = ', '.join([f'"{col}" TEXT' for col in first_chunk.columns])
+    create_table_sql = f"DROP TABLE IF EXISTS {table_name}; CREATE TABLE {table_name} ({columns_ddl});"
+
+    logger.info(f"[SYNC] Creating table with {len(first_chunk.columns)} TEXT columns")
+
+    with sync_engine.connect() as conn:
+        conn.execute(text(create_table_sql))
+        conn.commit()
+
+    logger.info(f"[SYNC] Created table: {table_name}")
+
+    # Count actual records
+    actual_file_lines = 0
+    is_json_array = False
+
+    try:
+        if file_format.lower() == 'csv':
+            with open(file_path, 'r', encoding=encoding) as f:
+                actual_file_lines = sum(1 for _ in f) - 1
+        elif file_format.lower() == 'json':
+            with open(file_path, 'r', encoding=encoding) as f:
+                first_char = f.read(1).strip()
+                if first_char == '[':
+                    is_json_array = True
+                    # Use ijson to count records without loading entire file
+                    import ijson
+                    try:
+                        with open(file_path, 'rb') as jf:
+                            # Use binary mode for better ijson stability
+                            actual_file_lines = sum(1 for _ in ijson.items(jf, 'item'))
+                        logger.info(f"[SYNC] JSON array format: {actual_file_lines} records")
+                    except Exception as ijson_error:
+                        logger.warning(f"[SYNC] ijson count failed: {ijson_error}, using fallback")
+                        # Fallback: load entire file to count (memory heavy but safe)
+                        import json
+                        with open(file_path, 'r', encoding=encoding) as jf:
+                            data = json.load(jf)
+                            actual_file_lines = len(data) if isinstance(data, list) else 1
+                        logger.info(f"[SYNC] Fallback count: {actual_file_lines} records")
+                else:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        actual_file_lines = sum(1 for _ in f)
+                    logger.info(f"[SYNC] JSON Lines format: {actual_file_lines} records")
+        elif file_format.lower() == 'xml':
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            actual_file_lines = len(root)
+        logger.info(f"[SYNC] Actual record count: {actual_file_lines}")
+    except Exception as count_error:
+        logger.warning(f"[SYNC] Could not count records: {count_error}")
+
+    estimated_total = actual_file_lines if actual_file_lines > 0 else schema_info.get('total_rows', 0)
+
+    # Create chunk iterator
+    if file_format.lower() == 'csv':
+        chunk_iter = pd.read_csv(
+            file_path,
+            chunksize=chunk_size,
+            delimiter=delimiter,
+            encoding=encoding,
+            dtype=str,
+            on_bad_lines='warn',
+            engine='python',
+            quoting=3,
+            escapechar=None
+        )
+    elif file_format.lower() == 'json':
+        if is_json_array:
+            # Use ijson for streaming JSON array processing
+            import ijson
+            def json_array_chunk_generator(file_path, chunk_size):
+                records = []
+                try:
+                    with open(file_path, 'rb') as jf:
+                        # Use binary mode for better ijson stability
+                        for item in ijson.items(jf, 'item'):
+                            records.append(item)
+                            if len(records) >= chunk_size:
+                                yield pd.DataFrame(records).astype(str)
+                                records = []
+                        if records:
+                            yield pd.DataFrame(records).astype(str)
+                except Exception as ijson_error:
+                    logger.error(f"[SYNC] ijson streaming failed: {ijson_error}, using fallback")
+                    # Fallback: load entire file and chunk manually
+                    import json
+                    with open(file_path, 'r', encoding=encoding) as jf:
+                        data = json.load(jf)
+                        if not isinstance(data, list):
+                            data = [data]
+                        for i in range(0, len(data), chunk_size):
+                            chunk_data = data[i:i+chunk_size]
+                            yield pd.DataFrame(chunk_data).astype(str)
+            chunk_iter = json_array_chunk_generator(file_path, chunk_size)
+        else:
+            chunk_iter = pd.read_json(
+                file_path,
+                lines=True,
+                chunksize=chunk_size,
+                encoding=encoding,
+                dtype=str
+            )
+    elif file_format.lower() == 'xml':
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+
+        def xml_chunk_generator(xml_root, chunk_size):
+            records = []
+            for elem in xml_root:
+                record = {child.tag: child.text for child in elem}
+                records.append(record)
+                if len(records) >= chunk_size:
+                    df = pd.DataFrame(records)
+                    df = df.astype(str)
+                    yield df
+                    records = []
+            if records:
+                df = pd.DataFrame(records)
+                df = df.astype(str)
+                yield df
+
+        chunk_iter = xml_chunk_generator(root, chunk_size)
+    else:
+        raise ValueError(f"Unsupported file format: {file_format}")
+
+    # Process chunks
+    total_processed = 0
+    skipped_chunks = 0
+    last_chunk_num = 0
+
+    # Get column names for insert statement
+    columns_list = None
+
+    for chunk_num, chunk in enumerate(chunk_iter):
+        try:
+            # Clean column names
+            chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
+                           for col in chunk.columns]
+
+            # Store column list on first chunk
+            if columns_list is None:
+                columns_list = list(chunk.columns)
+
+            # Replace NaN/None with None explicitly for proper NULL handling
+            chunk = chunk.where(chunk.notnull(), None)
+
+            # COPY TEXT format is safest - escapes all special characters automatically
+            from io import StringIO
+
+            # Build TEXT format data (tab-separated, \N for NULL, escapes handled by psycopg2)
+            text_buffer = StringIO()
+
+            for row in chunk.values:
+                row_values = []
+                for v in row:
+                    if v is None or (isinstance(v, float) and pd.isna(v)):
+                        row_values.append('\\N')
+                    else:
+                        # Escape special characters for PostgreSQL TEXT format
+                        str_val = str(v).replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                        row_values.append(str_val)
+                text_buffer.write('\t'.join(row_values) + '\n')
+
+            text_buffer.seek(0)
+
+            # Use COPY TEXT format (most reliable for problematic data)
+            columns_str = ', '.join([f'"{col}"' for col in columns_list])
+            copy_sql = f"COPY {table_name} ({columns_str}) FROM STDIN WITH (FORMAT TEXT)"
+
+            with pg_conn.cursor() as cursor:
+                cursor.copy_expert(copy_sql, text_buffer)
+                pg_conn.commit()
+
+            total_processed += len(chunk)
+            last_chunk_num = chunk_num
+
+            # Log and publish progress every 2 chunks (more frequent updates)
+            if chunk_num % 2 == 0:
+                progress_percent = round((total_processed / estimated_total * 100), 2) if estimated_total > 0 else 0
+                logger.info(f"[SYNC] Chunk {chunk_num}: {total_processed}/{estimated_total} ({progress_percent}%)")
+
+                # Save progress to database
+                try:
+                    with sync_engine.connect() as conn:
+                        conn.execute(text("""
+                            INSERT INTO processing_progress
+                            (job_id, stage, stage_order, progress_percent, records_processed, total_records, message, timestamp)
+                            VALUES (:job_id, :stage, :stage_order, :progress_percent, :records_processed, :total_records, :message, :timestamp)
+                        """), {
+                            'job_id': job_id,
+                            'stage': 'Data Loading',
+                            'stage_order': 4,
+                            'progress_percent': progress_percent,
+                            'records_processed': total_processed,
+                            'total_records': estimated_total,
+                            'message': f'Loading data chunk {chunk_num}',
+                            'timestamp': datetime.utcnow()
+                        })
+                        conn.commit()
+                except Exception as progress_error:
+                    logger.warning(f"[SYNC] Progress save failed: {progress_error}")
+
+                # Publish real-time progress to Redis
+                try:
+                    progress_data = {
+                        'job_id': job_id,
+                        'type': 'progress_update',
+                        'data': {
+                            'status': 'processing',
+                            'stage': 'Data Loading',
+                            'progress_percent': progress_percent,
+                            'records_processed': total_processed,
+                            'total_records': estimated_total,
+                            'message': f'Processing chunk {chunk_num}...'
+                        },
+                        'timestamp': datetime.utcnow().isoformat()
+                    }
+                    redis_client.publish(f'job_progress:{job_id}', json.dumps(progress_data))
+                    logger.info(f"[SYNC] Published progress to Redis: {progress_percent}%")
+                except Exception as redis_error:
+                    logger.warning(f"[SYNC] Redis publish failed: {redis_error}")
+
+        except Exception as chunk_error:
+            skipped_chunks += 1
+            logger.error(f"[SYNC] Chunk {chunk_num} failed: {chunk_error}")
+            continue
+
+    # Always publish final progress (ensure 100% is shown)
+    if total_processed > 0:
+        final_progress_percent = 100.0 if total_processed >= estimated_total else round((total_processed / estimated_total * 100), 2)
+        logger.info(f"[SYNC] Final progress: {total_processed}/{estimated_total} ({final_progress_percent}%)")
+
+        # Save final progress to database
+        try:
+            with sync_engine.connect() as conn:
+                conn.execute(text("""
+                    INSERT INTO processing_progress
+                    (job_id, stage, stage_order, progress_percent, records_processed, total_records, message, timestamp)
+                    VALUES (:job_id, :stage, :stage_order, :progress_percent, :records_processed, :total_records, :message, :timestamp)
+                """), {
+                    'job_id': job_id,
+                    'stage': 'Data Loading',
+                    'stage_order': 4,
+                    'progress_percent': final_progress_percent,
+                    'records_processed': total_processed,
+                    'total_records': estimated_total,
+                    'message': f'Completed: {total_processed} records loaded',
+                    'timestamp': datetime.utcnow()
+                })
+                conn.commit()
+        except Exception as progress_error:
+            logger.warning(f"[SYNC] Final progress save failed: {progress_error}")
+
+        # Publish final progress to Redis
+        try:
+            final_data = {
+                'job_id': job_id,
+                'type': 'progress_update',
+                'data': {
+                    'status': 'processing',
+                    'stage': 'Data Loading',
+                    'progress_percent': final_progress_percent,
+                    'records_processed': total_processed,
+                    'total_records': estimated_total,
+                    'message': f'Completed: {total_processed} records loaded'
+                },
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            redis_client.publish(f'job_progress:{job_id}', json.dumps(final_data))
+            logger.info(f"[SYNC] Published final progress to Redis: {final_progress_percent}%")
+        except Exception as redis_error:
+            logger.warning(f"[SYNC] Final Redis publish failed: {redis_error}")
+
+    logger.info(f"[SYNC] Processing complete: {total_processed} records, {skipped_chunks} chunks skipped")
+
+    # Close connections
+    pg_conn.close()
+    redis_client.close()
+
+    return {
+        'total_processed': total_processed,
+        'skipped_chunks': skipped_chunks,
+        'estimated_total': estimated_total
+    }
+
+
 async def _process_data_directly(job_id, file_path: str, file_format: str, destination: str, destination_config: dict, schema_info: dict, db):
     """Direct data processing when Airflow is unavailable"""
-    import pandas as pd
-    from sqlalchemy import create_engine, text, Text
+    import asyncio
     import os
 
     logger.info(f"Starting direct data processing for job {job_id} with format: {file_format}")
@@ -383,256 +813,36 @@ async def _process_data_directly(job_id, file_path: str, file_format: str, desti
     table_name = f"processed_data_{str(job_id).replace('-', '_')}"
 
     try:
-        # Create synchronous database engine for pandas
+        # Get database URL for sync engine
         database_url = os.getenv('DATABASE_URL', '').replace('postgresql+asyncpg://', 'postgresql://')
-        sync_engine = create_engine(database_url)
 
-        # Read file in chunks for memory efficiency
-        chunk_size = 10000  # Process 10k records at a time
-        total_processed = 0
+        # Run entire pandas processing in thread pool to avoid async/sync conflicts
+        logger.info(f"Running pandas processing in thread pool for job {job_id}")
+        result = await asyncio.to_thread(
+            _pandas_processing_sync,
+            job_id,
+            file_path,
+            file_format,
+            table_name,
+            schema_info,
+            database_url
+        )
 
-        # Get file parameters and estimated total records from schema_info
-        delimiter = schema_info.get('csv_delimiter', ',')
-        encoding = schema_info.get('encoding', 'utf-8')
-        estimated_total = schema_info.get('total_rows', 0)
+        total_processed = result['total_processed']
+        skipped_chunks = result['skipped_chunks']
+        estimated_total = result['estimated_total']
 
-        logger.info(f"Processing {file_format.upper()} file: {file_path}, encoding '{encoding}', estimated {estimated_total} rows")
+        logger.info(f"Pandas processing completed: {total_processed}/{estimated_total} records, {skipped_chunks} chunks skipped")
 
-        # Read first sample to create table schema - use dtype=str to read as strings
-        if file_format.lower() == 'csv':
-            first_chunk = pd.read_csv(file_path, nrows=1000, delimiter=delimiter, encoding=encoding, dtype=str, low_memory=False)
-        elif file_format.lower() == 'json':
-            # Try JSON Lines first, then array format
-            try:
-                first_chunk = pd.read_json(file_path, lines=True, nrows=1000, encoding=encoding, dtype=str)
-            except:
-                # If JSON Lines fails, try array format
-                logger.info("JSON Lines format failed, trying array format")
-                df = pd.read_json(file_path, encoding=encoding, dtype=str)
-                first_chunk = df.head(1000)
-        elif file_format.lower() == 'xml':
-            # Read XML - pandas expects specific structure
-            import xml.etree.ElementTree as ET
-            tree = ET.parse(file_path)
-            root = tree.getroot()
-            # Get first 1000 records
-            records = []
-            for i, elem in enumerate(root):
-                if i >= 1000:
-                    break
-                record = {child.tag: child.text for child in elem}
-                records.append(record)
-            first_chunk = pd.DataFrame(records)
-            first_chunk = first_chunk.astype(str)
-        else:
-            raise ValueError(f"Unsupported file format: {file_format}")
-
-        if first_chunk.empty:
-            logger.warning(f"{file_format.upper()} file is empty: {file_path}")
-            return 0
-
-        # Clean column names (remove spaces, special characters)
-        first_chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
-                              for col in first_chunk.columns]
-
-        # Create table schema manually with TEXT columns to avoid pandas type inference
-        columns_ddl = ', '.join([f'"{col}" TEXT' for col in first_chunk.columns])
-        create_table_sql = f"DROP TABLE IF EXISTS {table_name}; CREATE TABLE {table_name} ({columns_ddl});"
-
-        logger.info(f"Executing DDL with {len(first_chunk.columns)} TEXT columns")
-
-        with sync_engine.connect() as conn:
-            conn.execute(text(create_table_sql))
-            conn.commit()
-
-        logger.info(f"Created table with TEXT columns: {table_name}")
-
-        # Count actual lines/records in file for verification
-        actual_file_lines = 0
-        is_json_array = False
-        try:
-            if file_format.lower() == 'csv':
-                with open(file_path, 'r', encoding=encoding) as f:
-                    actual_file_lines = sum(1 for _ in f) - 1  # Subtract 1 for header
-            elif file_format.lower() == 'json':
-                # Check if it's JSON array or JSON Lines
-                with open(file_path, 'r', encoding=encoding) as f:
-                    first_char = f.read(1).strip()
-                    if first_char == '[':
-                        # JSON array - count by loading (no chunked support)
-                        is_json_array = True
-                        df_full = pd.read_json(file_path, encoding=encoding, dtype=str)
-                        actual_file_lines = len(df_full)
-                        logger.info(f"Detected JSON array format with {actual_file_lines} records")
-                    else:
-                        # JSON Lines format - count lines
-                        with open(file_path, 'r', encoding=encoding) as f:
-                            actual_file_lines = sum(1 for _ in f)
-                        logger.info(f"Detected JSON Lines format with {actual_file_lines} records")
-            elif file_format.lower() == 'xml':
-                # Count XML elements
-                import xml.etree.ElementTree as ET
-                tree = ET.parse(file_path)
-                root = tree.getroot()
-                actual_file_lines = len(root)
-            logger.info(f"Actual file record count: {actual_file_lines} data records")
-        except Exception as count_error:
-            logger.warning(f"Could not count file records: {count_error}")
-
-        # Process file in chunks - read all as strings to avoid type conversion errors
-        # Use actual file record count as the true total
-        if actual_file_lines > 0:
-            estimated_total = actual_file_lines
-            logger.info(f"Using actual file record count as total: {estimated_total} records")
-
-        # Create chunk iterator based on file format
-        if file_format.lower() == 'csv':
-            chunk_iter = pd.read_csv(
-                file_path,
-                chunksize=chunk_size,
-                delimiter=delimiter,
-                encoding=encoding,
-                dtype=str,
-                on_bad_lines='warn',  # Warn about bad lines but try to process them
-                engine='python',  # Python engine is more flexible with malformed data
-                quoting=3,  # QUOTE_NONE - don't use special quoting
-                escapechar=None  # Don't use escape characters
-                # Note: low_memory is not supported with python engine
-            )
-        elif file_format.lower() == 'json':
-            if is_json_array:
-                # JSON array - already loaded, chunk manually
-                def json_array_chunk_generator(df, chunk_size):
-                    for i in range(0, len(df), chunk_size):
-                        yield df[i:i+chunk_size]
-                chunk_iter = json_array_chunk_generator(df_full, chunk_size)
-            else:
-                # JSON Lines format - use pandas chunked reading
-                chunk_iter = pd.read_json(
-                    file_path,
-                    lines=True,  # JSON Lines format
-                    chunksize=chunk_size,
-                    encoding=encoding,
-                    dtype=str
-                )
-        elif file_format.lower() == 'xml':
-            # XML doesn't support chunked reading in pandas, so we read and chunk manually
-            import xml.etree.ElementTree as ET
-            tree = ET.parse(file_path)
-            root = tree.getroot()
-
-            # Convert to chunks manually
-            def xml_chunk_generator(xml_root, chunk_size):
-                records = []
-                for elem in xml_root:
-                    record = {child.tag: child.text for child in elem}
-                    records.append(record)
-                    if len(records) >= chunk_size:
-                        df = pd.DataFrame(records)
-                        df = df.astype(str)
-                        yield df
-                        records = []
-                # Yield remaining records
-                if records:
-                    df = pd.DataFrame(records)
-                    df = df.astype(str)
-                    yield df
-
-            chunk_iter = xml_chunk_generator(root, chunk_size)
-        else:
-            raise ValueError(f"Unsupported file format: {file_format}")
-
-        skipped_chunks = 0
-        for chunk_num, chunk in enumerate(chunk_iter):
-            try:
-                # Clean column names to match table schema
-                chunk.columns = [col.strip().replace(' ', '_').replace('-', '_').replace('.', '_')
-                               for col in chunk.columns]
-
-                # Insert chunk into database - table already has TEXT columns
-                chunk.to_sql(table_name, sync_engine, if_exists='append', index=False, method='multi')
-
-                total_processed += len(chunk)
-            except Exception as chunk_error:
-                skipped_chunks += 1
-                logger.error(f"Failed to process chunk {chunk_num} for job {job_id}: {chunk_error}")
-                logger.error(f"Chunk size: {len(chunk)} rows - SKIPPING THIS CHUNK")
-                # Continue processing next chunks
-                continue
-
-            # Calculate progress percentage
-            progress_percent = round((total_processed / estimated_total * 100), 2) if estimated_total > 0 else 0
-
-            # Save progress every 10 chunks (100k records)
-            if chunk_num % 10 == 0:
-                logger.info(f"Processed {total_processed}/{estimated_total} records ({progress_percent}%) for job {job_id}")
-
-                # Save progress record using sync engine
-                try:
-                    from datetime import datetime
-                    with sync_engine.connect() as conn:
-                        conn.execute(text("""
-                            INSERT INTO processing_progress
-                            (job_id, stage, stage_order, progress_percent, records_processed, total_records, message, timestamp)
-                            VALUES (:job_id, :stage, :stage_order, :progress_percent, :records_processed, :total_records, :message, :timestamp)
-                        """), {
-                            'job_id': job_id,
-                            'stage': 'Data Loading',
-                            'stage_order': 4,
-                            'progress_percent': progress_percent,
-                            'records_processed': total_processed,
-                            'total_records': estimated_total,
-                            'message': f'Loading data to {table_name}',
-                            'timestamp': datetime.utcnow()
-                        })
-                        conn.commit()
-                except Exception as progress_error:
-                    logger.warning(f"Failed to save progress record: {progress_error}")
-
-        logger.info(f"Direct processing completed: {total_processed} records processed for job {job_id}")
-
-        # Log data loss if any
         if skipped_chunks > 0:
-            logger.error(f"WARNING: {skipped_chunks} chunks were skipped due to errors")
+            logger.error(f"WARNING: {skipped_chunks} chunks failed during processing")
 
-        # Compare with actual file lines (most accurate)
-        if actual_file_lines > 0:
-            data_loss = actual_file_lines - total_processed
-            if data_loss > 0:
-                loss_percent = round((data_loss / actual_file_lines * 100), 2)
-                logger.error(f"DATA LOSS: {data_loss} records missing ({loss_percent}%) - File has: {actual_file_lines}, Processed: {total_processed}")
-                logger.error(f"CAUSE: Pandas is dropping rows with parsing errors or delimiter mismatches")
-            else:
-                logger.info(f"SUCCESS: All {actual_file_lines} file records processed (100% success rate)")
-        else:
-            # Fallback to estimation
+        if estimated_total > 0 and total_processed < estimated_total:
             data_loss = estimated_total - total_processed
-            if data_loss > 0:
-                loss_percent = round((data_loss / estimated_total * 100), 2)
-                logger.warning(f"DATA LOSS DETECTED: {data_loss} records missing ({loss_percent}%) - Estimated: {estimated_total}, Processed: {total_processed}")
-
-        # Save final progress record
-        try:
-            from datetime import datetime
-            with sync_engine.connect() as conn:
-                conn.execute(text("""
-                    INSERT INTO processing_progress
-                    (job_id, stage, stage_order, progress_percent, records_processed, total_records, message, timestamp)
-                    VALUES (:job_id, :stage, :stage_order, :progress_percent, :records_processed, :total_records, :message, :timestamp)
-                """), {
-                    'job_id': job_id,
-                    'stage': 'Completed',
-                    'stage_order': 5,
-                    'progress_percent': 100.0,
-                    'records_processed': total_processed,
-                    'total_records': total_processed,
-                    'message': f'Successfully loaded {total_processed} records',
-                    'timestamp': datetime.utcnow()
-                })
-                conn.commit()
-                logger.info(f"Saved final progress record for job {job_id}: {total_processed} records")
-        except Exception as progress_error:
-            logger.warning(f"Failed to save final progress record: {progress_error}")
+            loss_percent = round((data_loss / estimated_total * 100), 2)
+            logger.warning(f"DATA LOSS: {data_loss} records missing ({loss_percent}%)")
+        elif estimated_total > 0:
+            logger.info(f"SUCCESS: All {estimated_total} records processed")
 
         return total_processed
 
@@ -652,13 +862,17 @@ async def process_job_manually(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Start processing in background
-    import threading
-    thread = threading.Thread(
-        target=process_file_background_wrapper,
-        args=(job_id, f"/app/data/input/{job_id}_{job.filename}", job.file_type, job.destination, job.destination_config)
+    # Start processing in background using asyncio.create_task
+    import asyncio
+    asyncio.create_task(
+        process_file_background(
+            job_id,
+            f"/app/data/input/{job_id}_{job.filename}",
+            job.file_type,
+            job.destination,
+            job.destination_config
+        )
     )
-    thread.start()
 
     return {"message": "Processing started", "job_id": job_id}
 

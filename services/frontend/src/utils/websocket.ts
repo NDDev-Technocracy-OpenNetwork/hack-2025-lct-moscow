@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { WebSocketMessage } from '../types'
 
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'http://localhost:8000'
+const WS_BASE_URL = import.meta.env.VITE_WS_URL || window.location.origin
 
 class WebSocketService {
   private socket: Socket | null = null
@@ -9,6 +9,8 @@ class WebSocketService {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private listeners = new Map<string, Set<(data: any) => void>>()
+  private pendingSubscriptions: Set<string> = new Set()
+  private connectionPromise: Promise<void> | null = null
 
   constructor() {
     this.clientId = this.generateClientId()
@@ -18,40 +20,60 @@ class WebSocketService {
     return 'client_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now()
   }
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        if (this.socket?.connected) {
-          resolve()
-          return
-        }
+  connect(): Promise<void> | null {
+    if (this.socket?.connected) {
+      return null
+    }
 
-        console.log('Connecting to WebSocket...', `${WS_BASE_URL}/ws/${this.clientId}`)
+    if (this.connectionPromise) {
+      return this.connectionPromise
+    }
+
+    this.connectionPromise = new Promise((resolve, reject) => {
+      try {
+
+        console.log('[WS] Connecting to:', WS_BASE_URL)
 
         this.socket = io(WS_BASE_URL, {
+          path: '/socket.io/',
           transports: ['websocket', 'polling'],
           timeout: 10000,
-          forceNew: true,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
         })
 
         this.socket.on('connect', () => {
-          console.log('WebSocket connected:', this.socket?.id)
+          console.log('[WS] Connected:', this.socket?.id)
           this.reconnectAttempts = 0
+          this.connectionPromise = null
+
+          // Re-subscribe to all pending subscriptions
+          this.pendingSubscriptions.forEach(jobId => {
+            if (this.socket?.connected) {
+              this.socket.emit('subscribe_job', { job_id: jobId })
+              console.log('[WS] Re-subscribed to job:', jobId)
+            }
+          })
+
           resolve()
         })
 
         this.socket.on('disconnect', (reason) => {
-          console.log('WebSocket disconnected:', reason)
+          console.log('[WS] Disconnected:', reason)
+          this.connectionPromise = null
           if (reason === 'io server disconnect') {
-            // Server disconnected, try to reconnect
             this.attemptReconnect()
           }
         })
 
         this.socket.on('connect_error', (error) => {
-          console.error('WebSocket connection error:', error)
+          console.log('[WS] Connection error:', error.message)
+          this.connectionPromise = null
+          if (this.reconnectAttempts === 0) {
+            reject(error)
+          }
           this.attemptReconnect()
-          reject(error)
         })
 
         this.socket.on('message', (data: WebSocketMessage) => {
@@ -79,18 +101,18 @@ class WebSocketService {
 
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached')
+      console.log('[WS] Max reconnection attempts reached')
       return
     }
 
     this.reconnectAttempts++
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000) // Exponential backoff, max 30s
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
 
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`)
+    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`)
 
     setTimeout(() => {
       this.connect().catch((error) => {
-        console.error('Reconnection failed:', error)
+        console.log('[WS] Reconnection failed:', error.message)
       })
     }, delay)
   }
@@ -118,16 +140,33 @@ class WebSocketService {
   }
 
   subscribeToJob(jobId: string): void {
+    this.pendingSubscriptions.add(jobId)
+
     if (this.socket?.connected) {
       this.socket.emit('subscribe_job', { job_id: jobId })
-      console.log('Subscribed to job:', jobId)
+      console.log('[WS] Subscribed to job:', jobId)
+    } else {
+      console.log('[WS] Queued subscription for job:', jobId)
+      const connectPromise = this.connect()
+      if (connectPromise) {
+        connectPromise.then(() => {
+          if (this.socket?.connected && this.pendingSubscriptions.has(jobId)) {
+            this.socket.emit('subscribe_job', { job_id: jobId })
+            console.log('[WS] Deferred subscription sent for job:', jobId)
+          }
+        }).catch(err => {
+          console.error('[WS] Failed to connect for subscription:', err)
+        })
+      }
     }
   }
 
   unsubscribeFromJob(jobId: string): void {
+    this.pendingSubscriptions.delete(jobId)
+
     if (this.socket?.connected) {
       this.socket.emit('unsubscribe_job', { job_id: jobId })
-      console.log('Unsubscribed from job:', jobId)
+      console.log('[WS] Unsubscribed from job:', jobId)
     }
   }
 
@@ -189,4 +228,4 @@ class WebSocketService {
 // Singleton instance
 const websocketService = new WebSocketService()
 
-export default websocketService
+export default websocketService// Build timestamp: Wed, Oct  1, 2025  6:29:18 AM

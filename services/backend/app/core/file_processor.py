@@ -166,14 +166,32 @@ class FileProcessor:
             file.seek(0)
 
             if first_line.startswith('['):
-                # JSON array
-                data = json.load(file)
-                if isinstance(data, list):
-                    sample_data = data[:self.sample_size] if len(data) > self.sample_size else data
-                    total_rows = len(data)
-                else:
-                    sample_data = [data]
-                    total_rows = 1
+                # JSON array - use ijson for memory-efficient parsing of large files
+                import ijson
+                sample_data = []
+                total_rows = 0
+
+                try:
+                    # Stream parse JSON array without loading entire file
+                    for item in ijson.items(file, 'item'):
+                        if len(sample_data) < self.sample_size:
+                            sample_data.append(item)
+                        total_rows += 1
+                except Exception as ijson_error:
+                    logger.warning(f"ijson parsing failed: {ijson_error}, falling back to json.load")
+                    # Fallback to standard json.load if ijson fails
+                    file.seek(0)
+                    try:
+                        data = json.load(file)
+                        if isinstance(data, list):
+                            sample_data = data[:self.sample_size] if len(data) > self.sample_size else data
+                            total_rows = len(data)
+                        else:
+                            sample_data = [data]
+                            total_rows = 1
+                    except json.JSONDecodeError as e:
+                        logger.error(f"JSON parsing failed completely: {e}")
+                        raise
             else:
                 # JSON lines or single object
                 lines = file.readlines()
@@ -243,15 +261,19 @@ class FileProcessor:
         """Analyze large XML files using streaming parser"""
         import xml.etree.ElementTree as ET
 
-        logger.info(f"Starting streaming XML analysis")
+        logger.info(f"Starting streaming XML analysis for file: {file_path}")
         records = []
         root_tag = None
         record_tag = None
         total_elements = 0
 
-        # Use iterparse for memory-efficient parsing
-        context = ET.iterparse(file_path, events=('start', 'end'))
-        context = iter(context)
+        # Use iterparse for memory-efficient parsing (pass file path as string, not file handle)
+        try:
+            context = ET.iterparse(file_path, events=('start', 'end'))
+            context = iter(context)
+        except Exception as e:
+            logger.error(f"Failed to create iterparse context: {e}")
+            raise ValueError(f"Cannot parse XML file: {e}")
 
         try:
             event, root = next(context)

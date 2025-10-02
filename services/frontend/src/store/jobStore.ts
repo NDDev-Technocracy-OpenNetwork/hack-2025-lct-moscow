@@ -200,31 +200,98 @@ export const useJobStore = create<JobStore>((set, get) => ({
   subscribeToJob: (jobId: string) => {
     websocketService.subscribeToJob(jobId)
 
-    // Set up listener for job updates
-    websocketService.onJobUpdate(jobId, (message) => {
-      console.log('Job update received in store:', message)
+    // Set up listener for progress_update events
+    websocketService.on('progress_update', (message) => {
+      if (message.job_id === jobId || message.data?.job_id === jobId) {
+        console.log('[Store] Progress update for job:', jobId, message)
 
-      const { data } = message
+        const data = message.data || message
 
-      // Update job status if available
-      if (data.status) {
+        // Update job status with real-time data
+        get().updateJobStatus(jobId, {
+          job_id: jobId,
+          status: data.status || 'processing',
+          records_processed: data.records_processed || 0,
+          records_total: data.total_records || data.records_total || 0,
+          progress_percentage: data.progress_percent || data.progress_percentage || 0,
+          current_stage: data.stage || data.current_stage,
+          error_message: data.error_message
+        })
+
+        // Update job in jobs list and currentJob
+        const jobUpdates: Partial<Job> = {
+          status: data.status || 'processing',
+          records_processed: data.records_processed || 0,
+          records_total: data.total_records || data.records_total || 0
+        }
+
+        // If DDL/ETL scripts are in the message, save them
+        if (data.ddl_script) {
+          jobUpdates.ddl_script = data.ddl_script
+        }
+        if (data.etl_script) {
+          jobUpdates.etl_script = data.etl_script
+        }
+
+        get().updateJob(jobId, jobUpdates)
+      }
+    })
+
+    // Listen for job status updates (complete job information)
+    websocketService.on('job_status_update', (message) => {
+      if (message.data?.job_id === jobId) {
+        console.log('[Store] Job status update for:', jobId, message)
+        const data = message.data
+
+        // Update job with complete information
+        get().updateJob(jobId, {
+          status: data.status,
+          records_processed: data.records_processed,
+          started_at: data.started_at,
+          completed_at: data.completed_at,
+          error_message: data.error_message
+        })
+
+        // Update job status
         get().updateJobStatus(jobId, {
           job_id: jobId,
           status: data.status,
           records_processed: data.records_processed || 0,
-          records_total: data.total_records || data.records_total || 0,
-          progress_percentage: data.progress_percent || 0,
-          current_stage: data.stage,
+          records_total: data.records_processed || 0,
+          progress_percentage: data.status === 'completed' ? 100 : 0,
+          current_stage: data.status === 'completed' ? 'Completed' : undefined,
           error_message: data.error_message
         })
+
+        // If DDL/ETL are available, trigger a refresh
+        if (data.has_ddl || data.has_etl) {
+          console.log('[Store] DDL/ETL scripts available, refreshing job data')
+          setTimeout(() => get().fetchJob(jobId), 500)
+        }
+      }
+    })
+
+    // Also listen for job-specific updates
+    websocketService.onJobUpdate(jobId, (message) => {
+      console.log('[Store] Job update for:', jobId, message)
+      const data = message.data || message
+
+      // If this is a DDL/ETL availability notification
+      if (data.ddl_available || data.etl_available) {
+        console.log('[Store] DDL/ETL scripts generated, refreshing job data')
+        setTimeout(() => get().fetchJob(jobId), 500)
+        return
       }
 
-      // Update job details if available
-      if (data.stage || data.message) {
-        get().updateJob(jobId, {
-          status: data.status || 'processing'
-        })
-      }
+      get().updateJobStatus(jobId, {
+        job_id: jobId,
+        status: data.status || 'processing',
+        records_processed: data.records_processed || 0,
+        total_records: data.total_records || data.records_total || 0,
+        progress_percentage: data.progress_percent || data.progress_percentage || 0,
+        current_stage: data.stage || data.current_stage,
+        error_message: data.error_message
+      })
     })
   },
 
@@ -233,7 +300,10 @@ export const useJobStore = create<JobStore>((set, get) => ({
   },
 }))
 
-// Initialize WebSocket connection when store is created
-websocketService.connect().catch(error => {
-  console.error('Failed to initialize WebSocket connection:', error)
-})
+// Initialize WebSocket connection immediately when store is created
+const connectPromise = websocketService.connect()
+if (connectPromise) {
+  connectPromise.catch(error => {
+    console.error('Failed to initialize WebSocket connection:', error)
+  })
+}

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import logging
 import uuid
 import json
+import socketio
 
 from app.api.v1 import api_router
 from app.core.websocket_manager import WebSocketManager
@@ -21,6 +22,14 @@ logger = logging.getLogger(__name__)
 
 # Global managers
 websocket_manager = WebSocketManager()
+
+# Socket.IO server setup
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    cors_allowed_origins='*',
+    logger=True,
+    engineio_logger=True
+)
 
 
 @asynccontextmanager
@@ -39,12 +48,30 @@ async def lifespan(app: FastAPI):
 
     # Initialize application state
     app.state.websocket_manager = websocket_manager
+    app.state.sio = sio
+
+    # Link Socket.IO to WebSocketManager
+    websocket_manager.sio = sio
+
+    # Start Redis subscriber for real-time progress updates
+    try:
+        await websocket_manager.start_redis_subscriber()
+        logger.info("Redis subscriber started for real-time progress updates")
+    except Exception as e:
+        logger.error(f"Failed to start Redis subscriber: {e}")
 
     logger.info("Application startup completed")
     yield
 
     # Shutdown
     logger.info("Application shutdown initiated")
+
+    # Stop Redis subscriber
+    try:
+        await websocket_manager.stop_redis_subscriber()
+        logger.info("Redis subscriber stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop Redis subscriber: {e}")
 
 
 # Initialize FastAPI application
@@ -171,56 +198,53 @@ async def startup_message():
     logger.info("WebSocket endpoint available at /ws/{{client_id}}")
 
 
-# Socket.IO compatibility endpoint
-@app.websocket("/socket.io/")
-async def socketio_websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint with Socket.IO protocol compatibility"""
-    await websocket.accept()
-    client_id = f"socketio_{uuid.uuid4().hex[:8]}"
+# Socket.IO event handlers
+@sio.event
+async def connect(sid, environ):
+    """Handle Socket.IO client connection"""
+    logger.info(f"Socket.IO client {sid} connected (total: {len(websocket_manager.job_subscribers) + 1})")
+    # Don't add to active_connections for Socket.IO - it's managed by Socket.IO itself
+    return True
 
-    logger.info(f"Socket.IO-compatible client {client_id} connected")
+@sio.event
+async def disconnect(sid):
+    """Handle Socket.IO client disconnection"""
+    logger.info(f"Socket.IO client {sid} disconnected")
+    # Clean up subscriptions
+    if sid in websocket_manager.client_subscriptions:
+        job_ids = list(websocket_manager.client_subscriptions[sid])
+        for job_id in job_ids:
+            if job_id in websocket_manager.job_subscribers:
+                websocket_manager.job_subscribers[job_id].discard(sid)
+        del websocket_manager.client_subscriptions[sid]
 
-    # Send initial connection confirmation in Engine.IO format
-    # Format: engineio_packet_type + data
-    await websocket.send_text('0{"sid":"' + client_id + '","upgrades":[],"pingInterval":25000,"pingTimeout":20000}')
+    # Clean up any remaining job_subscribers entries
+    for job_id in list(websocket_manager.job_subscribers.keys()):
+        if sid in websocket_manager.job_subscribers[job_id]:
+            websocket_manager.job_subscribers[job_id].discard(sid)
+        if not websocket_manager.job_subscribers[job_id]:
+            del websocket_manager.job_subscribers[job_id]
 
-    try:
-        while True:
-            # Receive message from client
-            message = await websocket.receive_text()
-            logger.debug(f"Received Socket.IO message from {client_id}: {message}")
+@sio.event
+async def subscribe_job(sid, data):
+    """Handle job subscription"""
+    job_id = data.get("job_id")
+    if job_id:
+        await websocket_manager.subscribe_to_job(sid, job_id)
+        logger.info(f"Socket.IO client {sid} subscribed to job {job_id}")
+        await sio.emit('subscribed', {"job_id": job_id, "status": "subscribed"}, room=sid)
 
-            # Handle Engine.IO ping/pong
-            if message == "2":  # ping
-                await websocket.send_text("3")  # pong
-                continue
-            elif message == "3":  # pong
-                continue
+@sio.event
+async def unsubscribe_job(sid, data):
+    """Handle job unsubscription"""
+    job_id = data.get("job_id")
+    if job_id:
+        await websocket_manager.unsubscribe_from_job(sid, job_id)
+        logger.info(f"Socket.IO client {sid} unsubscribed from job {job_id}")
+        await sio.emit('unsubscribed', {"job_id": job_id, "status": "unsubscribed"}, room=sid)
 
-            # Handle Socket.IO messages
-            if message.startswith('42'):  # Socket.IO event message
-                try:
-                    # Extract JSON from Socket.IO message format
-                    data_part = message[2:]  # Remove '42' prefix
-                    data = json.loads(data_part)
-
-                    if len(data) >= 2:
-                        event_name = data[0]
-                        event_data = data[1] if len(data) > 1 else {}
-
-                        logger.info(f"Socket.IO event '{event_name}' from {client_id}: {event_data}")
-
-                        # Respond with Socket.IO format
-                        response = json.dumps(["response", {"status": "received", "event": event_name}])
-                        await websocket.send_text("42" + response)
-
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid Socket.IO message from {client_id}: {message}")
-
-    except WebSocketDisconnect:
-        logger.info(f"Socket.IO-compatible client {client_id} disconnected")
-    except Exception as e:
-        logger.error(f"Socket.IO WebSocket error for client {client_id}: {e}")
+# Mount Socket.IO app
+socket_app = socketio.ASGIApp(sio, app)
 
 if __name__ == "__main__":
     import uvicorn

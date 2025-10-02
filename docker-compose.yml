@@ -36,9 +36,6 @@ services:
     build:
       context: ./services/frontend
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${BACKEND_EXTERNAL_URL:-http://localhost}
-        VITE_WS_URL: ${WEBSOCKET_EXTERNAL_URL:-http://localhost}
     container_name: bigdata-frontend
     restart: unless-stopped
     expose:
