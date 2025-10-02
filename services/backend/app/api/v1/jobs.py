@@ -535,21 +535,17 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
                 first_char = f.read(1).strip()
                 if first_char == '[':
                     is_json_array = True
-                    # Use ijson to count records without loading entire file
-                    import ijson
-                    try:
-                        with open(file_path, 'rb') as jf:
-                            # Use binary mode for better ijson stability
-                            actual_file_lines = sum(1 for _ in ijson.items(jf, 'item'))
-                        logger.info(f"[SYNC] JSON array format: {actual_file_lines} records")
-                    except Exception as ijson_error:
-                        logger.warning(f"[SYNC] ijson count failed: {ijson_error}, using fallback")
-                        # Fallback: load entire file to count (memory heavy but safe)
-                        import json
-                        with open(file_path, 'r', encoding=encoding) as jf:
-                            data = json.load(jf)
+                    # IMPORTANT: ijson.items() can cause SEGFAULT with invalid Unicode
+                    # Using safe json.load() with error handling instead
+                    import json
+                    with open(file_path, 'r', encoding=encoding, errors='replace') as jf:
+                        data = json.load(jf)
+                        if data is None:
+                            logger.error("[SYNC] JSON load returned None")
+                            actual_file_lines = 0
+                        else:
                             actual_file_lines = len(data) if isinstance(data, list) else 1
-                        logger.info(f"[SYNC] Fallback count: {actual_file_lines} records")
+                    logger.info(f"[SYNC] JSON array format: {actual_file_lines} records")
                 else:
                     with open(file_path, 'r', encoding=encoding) as f:
                         actual_file_lines = sum(1 for _ in f)
@@ -579,31 +575,20 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
         )
     elif file_format.lower() == 'json':
         if is_json_array:
-            # Use ijson for streaming JSON array processing
-            import ijson
+            # IMPORTANT: ijson.items() causes SEGFAULT with invalid Unicode
+            # Using safe json.load() with chunking instead
+            import json
             def json_array_chunk_generator(file_path, chunk_size):
-                records = []
-                try:
-                    with open(file_path, 'rb') as jf:
-                        # Use binary mode for better ijson stability
-                        for item in ijson.items(jf, 'item'):
-                            records.append(item)
-                            if len(records) >= chunk_size:
-                                yield pd.DataFrame(records).astype(str)
-                                records = []
-                        if records:
-                            yield pd.DataFrame(records).astype(str)
-                except Exception as ijson_error:
-                    logger.error(f"[SYNC] ijson streaming failed: {ijson_error}, using fallback")
-                    # Fallback: load entire file and chunk manually
-                    import json
-                    with open(file_path, 'r', encoding=encoding) as jf:
-                        data = json.load(jf)
-                        if not isinstance(data, list):
-                            data = [data]
-                        for i in range(0, len(data), chunk_size):
-                            chunk_data = data[i:i+chunk_size]
-                            yield pd.DataFrame(chunk_data).astype(str)
+                with open(file_path, 'r', encoding=encoding, errors='replace') as jf:
+                    data = json.load(jf)
+                    if data is None:
+                        logger.error(f"[SYNC] JSON file is empty or corrupted")
+                        raise ValueError("JSON file is empty or corrupted")
+                    if not isinstance(data, list):
+                        data = [data]
+                    for i in range(0, len(data), chunk_size):
+                        chunk_data = data[i:i+chunk_size]
+                        yield pd.DataFrame(chunk_data).astype(str)
             chunk_iter = json_array_chunk_generator(file_path, chunk_size)
         else:
             chunk_iter = pd.read_json(
