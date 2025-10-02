@@ -663,7 +663,8 @@ def _pandas_processing_sync(job_id: str, file_path: str, file_format: str, table
 
             # Use COPY TEXT format (most reliable for problematic data)
             columns_str = ', '.join([f'"{col}"' for col in columns_list])
-            copy_sql = f"COPY {table_name} ({columns_str}) FROM STDIN WITH (FORMAT TEXT)"
+            # Escape % as %% for copy_expert (prevents "not all arguments converted" error)
+            copy_sql = f"COPY {table_name} ({columns_str}) FROM STDIN WITH (FORMAT TEXT)".replace('%', '%%')
 
             with pg_conn.cursor() as cursor:
                 cursor.copy_expert(copy_sql, text_buffer)
