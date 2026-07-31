@@ -1,5 +1,9 @@
 # Система распределенной обработки больших данных
 
+> **DEPRECATED.** This repository is archived and no longer maintained.
+> It is kept read-only for reference; its GDS anchor records
+> `lifecycle: archived` under `portfolio:archived-projects`.
+
 Микросервисная система для загрузки, анализа и обработки больших файлов данных (CSV, JSON, XML) с автоматической генерацией DDL/ETL скриптов и загрузкой в целевые хранилища (PostgreSQL, ClickHouse, HDFS).
 
 ## Архитектура

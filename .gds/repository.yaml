@@ -1,0 +1,37 @@
+schema_version: 1
+repository:
+  id: "repo_01KYVP7RA5D8JJ60RWDZ0NJ5FE"
+  display_name: "hack-2025-lct-moscow"
+  roles:
+    - "project"
+  lifecycle: "archived"
+provider:
+  type: "github"
+  installation: "installation:github-personal"
+  repository_id: 1061439950
+  owner: "rldyourmnd"
+  name: "hack-2025-lct-moscow"
+classification:
+  portfolios:
+    - "portfolio:archived-projects"
+  visibility_contract: "private"
+  data_classification: "private"
+policy:
+  profiles:
+    - "repository-default"
+    - "personal-default"
+  rollout_ring: "standard"
+git:
+  default_branch: "main"
+  integration: "pull-request"
+  branch_model: "task-branches"
+  handoff_pr: "never"
+  cleanup: "manual"
+agent:
+  context_profile: "project-default"
+  generated_agents: false
+  serena:
+    enabled: false
+    provenance_required: false
+release:
+  mode: "none"
