@@ -9,7 +9,7 @@ permissions: {}
 jobs:
   python-ci:
     name: python-ci
-    uses: NDDev-it-com/ci-workflows/.github/workflows/python-ci.yml@ca538d59aef41c1bb03c3669366c368128d5af88
+    uses: NDDev-it-com/ci-workflows/.github/workflows/python-ci.yml@b05016e27151e2d5b3f07e1d856fff50f635ab15
     with:
       runner: server-nddev-amsterdam
       python_version: '3.11'
