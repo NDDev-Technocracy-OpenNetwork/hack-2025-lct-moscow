@@ -1,0 +1,18 @@
+name: python-ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  python-ci:
+    name: python-ci
+    uses: NDDev-it-com/ci-workflows/.github/workflows/python-ci.yml@ca538d59aef41c1bb03c3669366c368128d5af88
+    with:
+      runner: server-nddev-amsterdam
+      python_version: '3.11'
+      working_directory: services/backend
+      install_command: 'uv pip install --system -r requirements.txt'
+      test_command: 'python -m compileall -q app'

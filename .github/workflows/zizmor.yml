@@ -1,0 +1,14 @@
+name: zizmor
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor
+    uses: NDDev-it-com/ci-workflows/.github/workflows/zizmor-no-sarif.yml@ca538d59aef41c1bb03c3669366c368128d5af88
+    with:
+      runner: server-nddev-amsterdam

@@ -1,0 +1,14 @@
+name: actionlint
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  actionlint:
+    name: actionlint
+    uses: NDDev-it-com/ci-workflows/.github/workflows/actionlint.yml@ca538d59aef41c1bb03c3669366c368128d5af88
+    with:
+      runner: server-nddev-amsterdam
