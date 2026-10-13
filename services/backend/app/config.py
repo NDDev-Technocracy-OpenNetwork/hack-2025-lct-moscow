@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # The shared root file also configures the other services.
 
 
 settings = Settings()

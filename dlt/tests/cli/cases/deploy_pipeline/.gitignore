@@ -1,6 +1,0 @@
-# ignore secrets, virtual environments and typical python compilation artifacts
-secrets.toml
-.env
-**/__pycache__/
-**/*.py[cod]
-**/*$py.class
