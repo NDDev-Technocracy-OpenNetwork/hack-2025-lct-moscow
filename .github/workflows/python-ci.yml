@@ -15,5 +15,5 @@ jobs:
       runner: ubuntu-latest
       python_version: '3.11'
       working_directory: services/backend
-      install_command: 'uv pip install --system -r requirements.txt'
-      test_command: 'python -m compileall -q app'
+      install_command: 'uv venv --python 3.11 .venv && uv pip install --python .venv/bin/python -r requirements.txt'
+      test_command: ".venv/bin/python -m unittest discover -s tests -v && .venv/bin/python -m compileall -q app"
