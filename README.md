@@ -3,7 +3,7 @@
 
 LCT Moscow 2025 hackathon prototype: distributed data ingestion, generated DDL/ETL and storage pipelines. FastAPI + React.
 
-[NDDev OpenNetwork](https://github.com/NDDev-Technocracy-OpenNetwork) · [Repository](https://github.com/NDDev-Technocracy-OpenNetwork/hack-2025-lct-moscow)
+[NDDev OpenNetwork](https://github.com/NDDev-Technocracy-OpenNetwork) · [Repository](https://github.com/rldyourmnd/hack-2025-lct-moscow)
 
 This repository is a hackathon prototype or supporting tool. Follow the project-specific setup below; cloud integrations require your own configuration and credentials.
 
@@ -63,7 +63,7 @@ This repository is a hackathon prototype or supporting tool. Follow the project-
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/NDDev-Technocracy-OpenNetwork/hack-2025-lct-moscow.git
+git clone https://github.com/rldyourmnd/hack-2025-lct-moscow.git
 cd hack-2025-lct-moscow
 ```
 
