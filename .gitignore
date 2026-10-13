@@ -206,3 +206,5 @@ claude_artifacts/
 # Frontend build artifacts
 services/frontend/dist/
 services/frontend/.vite/
+# Keep reproducible frontend dependency resolution.
+!services/frontend/package-lock.json

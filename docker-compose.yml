@@ -250,8 +250,8 @@ services:
     environment:
       - AIRFLOW__CORE__EXECUTOR=${AIRFLOW_EXECUTOR:-LocalExecutor}
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW_DATABASE_URL:-postgresql://bigdata_user:bigdata_pass@postgres:5432/airflow_db}
-      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY:-lv9mGx11ed56ksPBhVfNSLqwTRFapSFNAjWiOEjU2As=}
-      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_WEBSERVER_SECRET_KEY:-your-secret-webserver-key}
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW_FERNET_KEY:?Run python3 scripts/configure-local.py}
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_WEBSERVER_SECRET_KEY:?Run python3 scripts/configure-local.py}
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true

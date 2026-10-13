@@ -1,37 +1,45 @@
 schema_version: 1
 repository:
-  id: "repo_01KYVP7RA5D8JJ60RWDZ0NJ5FE"
-  display_name: "hack-2025-lct-moscow"
+  id: repo_01KYVP7RA5D8JJ60RWDZ0NJ5FE
+  display_name: hack-2025-lct-moscow
   roles:
-    - "project"
-  lifecycle: "archived"
+  - project
+  lifecycle: active
 provider:
-  type: "github"
-  installation: "installation:github-personal"
+  type: github
+  installation: installation:github-nddev-technocracy-opennetwork
   repository_id: 1061439950
-  owner: "rldyourmnd"
-  name: "hack-2025-lct-moscow"
+  owner: NDDev-Technocracy-OpenNetwork
+  name: hack-2025-lct-moscow
+  aliases:
+  - owner: rldyourmnd
+    name: hack-2025-lct-moscow
+  - owner: NDDev-Technocracy-Archive
+    name: hack-2025-lct-moscow
 classification:
   portfolios:
-    - "portfolio:archived-projects"
-  visibility_contract: "private"
-  data_classification: "private"
+  - portfolio:nddev-technocracy-opennetwork
+  visibility_contract: public
+  data_classification: public
 policy:
   profiles:
-    - "repository-default"
-    - "personal-default"
-  rollout_ring: "standard"
+  - repository-default
+  - organization-default
+  rollout_ring: standard
 git:
-  default_branch: "main"
-  integration: "pull-request"
-  branch_model: "task-branches"
-  handoff_pr: "never"
-  cleanup: "manual"
+  default_branch: main
+  integration: pull-request
+  branch_model: task-branches
+  handoff_pr: never
+  cleanup: manual
 agent:
-  context_profile: "project-default"
+  context_profile: project-default
   generated_agents: false
   serena:
     enabled: false
     provenance_required: false
 release:
-  mode: "none"
+  mode: none
+product:
+  purpose: 'LCT Moscow 2025 hackathon prototype: distributed data ingestion, generated
+    DDL/ETL and storage pipelines. FastAPI + React.'

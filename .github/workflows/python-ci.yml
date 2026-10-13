@@ -9,10 +9,11 @@ permissions: {}
 jobs:
   python-ci:
     name: python-ci
-    uses: NDDev-it-com/ci-workflows/.github/workflows/python-ci.yml@b05016e27151e2d5b3f07e1d856fff50f635ab15
+    uses: NDDev-Technocracy-OpenNetwork/ci-workflows/.github/workflows/python-ci.yml@93eeb2a65e98a29e9dbff7909f67c6419abff046
     with:
-      runner: server-nddev-amsterdam
+      uv_version: "0.12.23"
+      runner: ubuntu-latest
       python_version: '3.11'
       working_directory: services/backend
-      install_command: 'uv pip install --system -r requirements.txt'
-      test_command: 'python -m compileall -q app'
+      install_command: 'uv pip install -r requirements.txt'
+      test_command: ".venv/bin/python -m unittest discover -s tests -v && .venv/bin/python -m compileall -q app"

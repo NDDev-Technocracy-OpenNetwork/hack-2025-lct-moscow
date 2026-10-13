@@ -1,8 +1,17 @@
-# Система распределенной обработки больших данных
+<!-- nddev-public-hackathon -->
+# hack-2025-lct-moscow
 
-> **DEPRECATED.** This repository is archived and no longer maintained.
-> It is kept read-only for reference; its GDS anchor records
-> `lifecycle: archived` under `portfolio:archived-projects`.
+LCT Moscow 2025 hackathon prototype: distributed data ingestion, generated DDL/ETL and storage pipelines. FastAPI + React.
+
+[NDDev OpenNetwork](https://github.com/NDDev-Technocracy-OpenNetwork) · [Repository](https://github.com/NDDev-Technocracy-OpenNetwork/hack-2025-lct-moscow)
+
+This repository is a hackathon prototype or supporting tool. Follow the project-specific setup below; cloud integrations require your own configuration and credentials.
+
+---
+
+## Система распределенной обработки больших данных
+
+
 
 Микросервисная система для загрузки, анализа и обработки больших файлов данных (CSV, JSON, XML) с автоматической генерацией DDL/ETL скриптов и загрузкой в целевые хранилища (PostgreSQL, ClickHouse, HDFS).
 
@@ -54,8 +63,8 @@
 ### 1. Клонирование репозитория
 
 ```bash
-git clone <repository-url>
-cd HACKATHON
+git clone https://github.com/NDDev-Technocracy-OpenNetwork/hack-2025-lct-moscow.git
+cd hack-2025-lct-moscow
 ```
 
 ### 2. Настройка переменных окружения
@@ -63,7 +72,7 @@ cd HACKATHON
 Скопируйте `.env.example` в `.env` и настройте параметры:
 
 ```bash
-cp .env.example .env
+python3 scripts/configure-local.py
 ```
 
 Основные параметры в `.env`:
@@ -90,7 +99,7 @@ LOG_LEVEL=info
 ### 3. Запуск базовых сервисов
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Это запустит: backend, frontend, postgres, clickhouse, redis, namenode, datanode, nginx.
@@ -98,7 +107,7 @@ docker-compose up -d
 ### 4. Запуск с Airflow (опционально)
 
 ```bash
-docker-compose --profile airflow up -d
+docker compose --profile airflow up -d
 ```
 
 ## Доступ к сервисам
@@ -212,7 +221,7 @@ curl -X DELETE http://localhost/api/v1/jobs/{job_id}
 │   ├── temp/           # Временные файлы
 │   └── processed/      # Обработанные файлы
 ├── logs/               # Логи сервисов
-├── docker-compose.yml  # Оркестрация сервисов
+├── docker compose.yml  # Оркестрация сервисов
 ├── .env               # Переменные окружения
 └── README.md
 ```
@@ -223,59 +232,59 @@ curl -X DELETE http://localhost/api/v1/jobs/{job_id}
 
 ```bash
 # Запуск всех сервисов
-docker-compose up -d
+docker compose up -d
 
 # Остановка сервисов
-docker-compose down
+docker compose down
 
 # Перезапуск конкретного сервиса
-docker-compose restart backend
+docker compose restart backend
 
 # Просмотр логов
-docker-compose logs -f backend
-docker-compose logs -f --tail 100 backend
+docker compose logs -f backend
+docker compose logs -f --tail 100 backend
 
 # Просмотр статуса
-docker-compose ps
+docker compose ps
 
 # Пересборка образа
-docker-compose build backend --no-cache
+docker compose build backend --no-cache
 ```
 
 ### Работа с базой данных
 
 ```bash
 # Подключение к PostgreSQL
-docker-compose exec postgres psql -U bigdata_user -d bigdata_db
+docker compose exec postgres psql -U bigdata_user -d bigdata_db
 
 # Подключение к ClickHouse
-docker-compose exec clickhouse clickhouse-client
+docker compose exec clickhouse clickhouse-client
 
 # Подключение к Redis
-docker-compose exec redis redis-cli
+docker compose exec redis redis-cli
 
 # Бэкап PostgreSQL
-docker-compose exec postgres pg_dump -U bigdata_user bigdata_db > backup.sql
+docker compose exec postgres pg_dump -U bigdata_user bigdata_db > backup.sql
 ```
 
 ### Работа с HDFS
 
 ```bash
 # Список файлов в HDFS
-docker-compose exec namenode hdfs dfs -ls /
+docker compose exec namenode hdfs dfs -ls /
 
 # Создание директории
-docker-compose exec namenode hdfs dfs -mkdir -p /data/input
+docker compose exec namenode hdfs dfs -mkdir -p /data/input
 
 # Загрузка файла в HDFS
-docker-compose exec namenode hdfs dfs -put /local/path /hdfs/path
+docker compose exec namenode hdfs dfs -put /local/path /hdfs/path
 ```
 
 ### Очистка
 
 ```bash
 # Удалить все контейнеры и volumes (потеря данных!)
-docker-compose down -v
+docker compose down -v
 
 # Очистить неиспользуемые Docker ресурсы
 docker system prune -a --volumes
@@ -287,31 +296,31 @@ docker system prune -a --volumes
 
 Проверьте подключение к PostgreSQL:
 ```bash
-docker-compose exec postgres pg_isready -U bigdata_user
-docker-compose logs postgres
+docker compose exec postgres pg_isready -U bigdata_user
+docker compose logs postgres
 ```
 
 ### WebSocket не подключается
 
-1. Проверьте логи nginx: `docker-compose logs nginx`
-2. Убедитесь, что backend запущен: `docker-compose ps backend`
+1. Проверьте логи nginx: `docker compose logs nginx`
+2. Убедитесь, что backend запущен: `docker compose ps backend`
 3. Очистите кэш браузера (Ctrl+F5)
 
 ### HDFS datanode не регистрируется
 
 ```bash
 # Проверьте namenode
-docker-compose logs namenode
+docker compose logs namenode
 
 # Перезапустите datanode
-docker-compose restart datanode
+docker compose restart datanode
 ```
 
 ### Ошибки при обработке файлов
 
 Проверьте логи backend:
 ```bash
-docker-compose logs backend --tail 200 | grep ERROR
+docker compose logs backend --tail 200 | grep ERROR
 ```
 
 ## Ограничения
@@ -353,3 +362,7 @@ MIT License
 ## Контакты
 
 При возникновении проблем создайте issue в репозитории проекта.
+
+## Local configuration and maintenance
+
+`python3 scripts/configure-local.py` creates a private ignored `.env` and fresh Airflow keys. Existing `.env` files are never overwritten. Use Docker Compose v2; `make clean` affects this project only. The unused vendored `dlt/` source snapshot was removed: services install the dependency declared in their requirements instead. Frontend code uses Vite public environment variables; the process environment is not bundled into browser assets.
