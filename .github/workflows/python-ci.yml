@@ -16,4 +16,4 @@ jobs:
       python_version: '3.11'
       working_directory: services/backend
       install_command: 'uv pip install -r requirements.txt'
-      test_command: ".venv/bin/python -m unittest discover -s tests -v && .venv/bin/python -m compileall -q app"
+      test_command: "python -m unittest discover -s tests -v && python -m compileall -q app"
